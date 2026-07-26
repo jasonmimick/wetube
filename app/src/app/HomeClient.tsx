@@ -6,11 +6,30 @@ import {
   signInWithPopup,
   signOut,
 } from "firebase/auth";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebaseClient";
+import { useActivityLog } from "@/lib/useActivityLog";
 import { useAgentStatus } from "@/lib/useAgentStatus";
 import { useAuthedUser } from "@/lib/useAuthedUser";
 import { useMass } from "@/lib/useMass";
+
+function useNow(intervalMs = 1000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+function relativeTime(iso: string | undefined, now: number) {
+  if (!iso) return "never";
+  const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
 
 const YOUTUBE_CHANNEL_URL =
   process.env.NEXT_PUBLIC_YOUTUBE_CHANNEL_URL ||
@@ -284,6 +303,75 @@ function MassControls({ idToken }: { idToken: string }) {
   );
 }
 
+function HeartbeatMonitor() {
+  const { status, online } = useAgentStatus();
+  const now = useNow();
+
+  return (
+    <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-5 shadow-[0_1px_2px_rgba(32,32,111,0.05)]">
+      <div className="flex items-center justify-between">
+        <h2 className="font-heading font-bold text-indigo-deep">Church PC Agent</h2>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold tracking-wide uppercase ${
+            online ? "bg-gold/15 text-[#93691f]" : "bg-brick/10 text-brick"
+          }`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-gold" : "bg-brick"}`} />
+          {online ? "Online" : "Offline"}
+        </span>
+      </div>
+      <dl className="space-y-1.5 text-sm">
+        <div className="flex justify-between">
+          <dt className="text-gray-500">Last heartbeat</dt>
+          <dd>{relativeTime(status?.lastHeartbeatAt, now)}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-gray-500">vMix connected</dt>
+          <dd>{status?.vmixConnected === undefined ? "—" : status.vmixConnected ? "Yes" : "No"}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-gray-500">Streaming</dt>
+          <dd>{status?.streaming ? "Yes" : "No"}</dd>
+        </div>
+      </dl>
+      {status?.lastError && (
+        <p className="rounded-md bg-red-50 p-2 font-mono text-xs text-red-800">{status.lastError}</p>
+      )}
+      {!online && (
+        <p className="text-xs text-gray-500">
+          No heartbeat in over 90s — the church PC agent may be off or unreachable.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ActivityLog() {
+  const entries = useActivityLog();
+  const now = useNow(30000);
+
+  return (
+    <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-5 shadow-[0_1px_2px_rgba(32,32,111,0.05)]">
+      <h2 className="font-heading font-bold text-indigo-deep">Activity Log</h2>
+      {entries.length === 0 ? (
+        <p className="text-sm text-gray-500">Nothing yet.</p>
+      ) : (
+        <ul className="divide-y divide-gray-100">
+          {entries.map((e) => (
+            <li key={e.id} className="flex items-center justify-between py-2 text-sm">
+              <span>
+                <span className="font-semibold capitalize text-indigo-deep">{e.action}</span>
+                <span className="text-gray-500"> by {e.byName}</span>
+              </span>
+              <span className="text-xs text-gray-400">{relativeTime(e.at, now)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function AdminPanel({ idToken }: { idToken: string }) {
   const [passcode, setPasscode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -360,7 +448,9 @@ export default function HomeClient() {
 
       <AgentBanner />
       {idToken && <MassControls idToken={idToken} />}
+      {role === "admin" && <HeartbeatMonitor />}
       {role === "admin" && idToken && <AdminPanel idToken={idToken} />}
+      {role === "admin" && <ActivityLog />}
     </div>
   );
 }
