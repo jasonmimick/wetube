@@ -1,0 +1,24 @@
+# dependencies
+node_modules
+agent/node_modules
+scripts/node_modules
+
+# env / secrets
+.env
+.env.*
+!.env.example
+**/service-account*.json
+**/firebase-adminsdk*.json
+**/*-key.json
+agent/wetube-agent-key.json
+
+# built agent executables (100MB+, built via `npm run build` in agent/)
+agent/dist/
+
+# misc
+.DS_Store
+*.log
+firestore-debug.log
+firebase-debug.log
+ui-debug.log
+.firebase/

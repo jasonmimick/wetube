@@ -1,0 +1,17 @@
+{
+  "name": "wetube",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Dev/test tooling for the wetube project (app/ and agent/ are separate deployables with their own package.json).",
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "devDependencies": {
+    "firebase-tools": "^13.29.1",
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase-admin": "^13.0.0",
+    "firebase": "^10.0.0",
+    "googleapis": "^144.0.0"
+  }
+}

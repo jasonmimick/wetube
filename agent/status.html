@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>wetube agent</title>
+<style>
+  :root {
+    --indigo: #5656af; --indigo-deep: #20206f; --ink: #23222e;
+    --muted: #6f6e7d; --line: #e6e5ee; --gold: #b8863b; --brick: #9c4a46;
+    --good: #2e7d4f; --bad: #b23b3b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: #f4f4f8; color: var(--ink); padding: 2rem 1.25rem;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  .header { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1.5rem; }
+  .mark { width: 34px; height: 34px; border-radius: 8px; flex: none;
+    background: linear-gradient(155deg, var(--indigo) 0%, var(--indigo-deep) 100%); position: relative; }
+  .mark::after { content: ""; position: absolute; inset: 0; margin: auto; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--gold); top: 7px; }
+  h1 { font-size: 1rem; margin: 0; color: var(--indigo-deep); }
+  .sub { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem;
+    box-shadow: 0 1px 2px rgba(32,32,111,0.05); }
+  .row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0;
+    border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+  .row:last-child { border-bottom: none; }
+  .row .label { color: var(--muted); }
+  .pill { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 0.2rem 0.55rem; border-radius: 20px; }
+  .pill.good { color: var(--good); background: rgba(46,125,79,0.12); }
+  .pill.bad { color: var(--bad); background: rgba(178,59,59,0.12); }
+  .pill.idle { color: var(--muted); background: #eee; }
+  .error { margin-top: 0.5rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.75rem;
+    color: var(--brick); background: #fdf2f1; border-radius: 6px; padding: 0.5rem 0.6rem; white-space: pre-wrap; }
+  .btns { display: flex; gap: 0.6rem; }
+  button { flex: 1; border: none; border-radius: 8px; padding: 0.7rem; font-weight: 700; font-size: 0.85rem; cursor: pointer; }
+  .go { background: var(--indigo); color: #fff; }
+  .stop { background: transparent; border: 1.5px solid var(--brick); color: var(--brick); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .note { font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="mark"></div>
+    <div><h1>wetube agent</h1><div class="sub" id="streamer-label">—</div></div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span class="label">Streaming software</span><span id="vmix-status" class="pill idle">—</span></div>
+    <div class="row"><span class="label">Currently streaming</span><span id="streaming-status" class="pill idle">—</span></div>
+    <div class="row"><span class="label">Last heartbeat</span><span id="heartbeat">—</span></div>
+    <div class="row"><span class="label">Last command</span><span id="last-command">—</span></div>
+    <div id="error-box"></div>
+  </div>
+
+  <div class="card">
+    <p class="note" style="margin-top:0">Manual override — controls the streaming software directly on this machine, bypassing the cloud app. Use this for local troubleshooting only.</p>
+    <div class="btns">
+      <button class="go" id="btn-start">Start Streaming</button>
+      <button class="stop" id="btn-stop">Stop Streaming</button>
+    </div>
+  </div>
+
+  <p class="note">This page only works on this machine (127.0.0.1) — it's not reachable from the internet or the church network.</p>
+</div>
+
+<script>
+  function fmtTime(iso) {
+    if (!iso) return "never";
+    const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 5) return "just now";
+    if (s < 60) return s + "s ago";
+    return Math.round(s / 60) + "m ago";
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch("/status");
+      const s = await res.json();
+      document.getElementById("streamer-label").textContent = "streamer: " + s.streamer;
+      const vmix = document.getElementById("vmix-status");
+      vmix.textContent = s.vmixConnected ? "Connected" : "Not reachable";
+      vmix.className = "pill " + (s.vmixConnected ? "good" : "bad");
+      const streaming = document.getElementById("streaming-status");
+      streaming.textContent = s.streaming ? "Live" : "Idle";
+      streaming.className = "pill " + (s.streaming ? "good" : "idle");
+      document.getElementById("heartbeat").textContent = fmtTime(s.lastHeartbeatAt);
+      document.getElementById("last-command").textContent = s.lastCommand || "none yet";
+      document.getElementById("error-box").innerHTML = s.lastError
+        ? '<div class="error">' + s.lastError.replace(/</g, "&lt;") + "</div>"
+        : "";
+      document.getElementById("btn-start").disabled = s.streaming;
+      document.getElementById("btn-stop").disabled = !s.streaming;
+    } catch {
+      document.getElementById("streamer-label").textContent = "not responding";
+    }
+  }
+
+  document.getElementById("btn-start").onclick = () => fetch("/start", { method: "POST" }).then(refresh);
+  document.getElementById("btn-stop").onclick = () => fetch("/stop", { method: "POST" }).then(refresh);
+
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>
