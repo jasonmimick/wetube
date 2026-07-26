@@ -3,7 +3,9 @@
 // streamer (mock / obs / vmix — see streamers/index.js), reporting a
 // heartbeat + status back so the web app knows if this process is alive.
 // Also serves a local-only status/control page (webserver.js) for whoever
-// is physically at the machine.
+// is physically at the machine — started first, before Firestore setup, so
+// a bad/missing config is *visible* on the dashboard instead of just
+// crashing the process with no explanation.
 //
 // See docs/DESIGN-stream-control.md "Reliability & fallback" for why this
 // polls rather than holding a persistent connection.
@@ -15,13 +17,15 @@ const { getFirestore } = require("firebase-admin/firestore");
 const streamer = require("./streamers");
 const state = require("./state");
 const webserver = require("./webserver");
+const { openBrowser } = require("./openBrowser");
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 3000);
+const WEB_PORT = Number(process.env.AGENT_WEB_PORT || 5757);
 const MASSES = "masses";
 const COMMANDS_DOC = "commands/latest";
 const AGENT_STATUS_DOC = "agent/status";
 
-function buildApp() {
+function buildFirestoreApp() {
   const projectId = process.env.FIREBASE_PROJECT_ID || "demo-wetube";
 
   if (process.env.FIRESTORE_EMULATOR_HOST) {
@@ -36,16 +40,21 @@ function buildApp() {
   const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
   if (!keyFile) {
     throw new Error(
-      "No Firestore credentials configured. Set FIRESTORE_EMULATOR_HOST for local " +
-        "testing, or GOOGLE_APPLICATION_CREDENTIALS / FIREBASE_SERVICE_ACCOUNT_JSON in production."
+      "No Firestore credentials configured. Create a .env file next to this " +
+        "program with FIREBASE_PROJECT_ID and GOOGLE_APPLICATION_CREDENTIALS " +
+        "(see docs/MANUAL_SETUP.md Phase 8)."
     );
   }
-  // gcloud/firebase-admin picks up GOOGLE_APPLICATION_CREDENTIALS itself.
+  // firebase-admin picks up GOOGLE_APPLICATION_CREDENTIALS itself, but check
+  // the file actually exists so the error is clear instead of a deep stack trace.
+  const fs = require("fs");
+  if (!fs.existsSync(keyFile)) {
+    throw new Error(`GOOGLE_APPLICATION_CREDENTIALS points to a file that doesn't exist: ${keyFile}`);
+  }
   return initializeApp({ projectId });
 }
 
-const db = getFirestore(buildApp());
-
+let db = null;
 let lastProcessedIssuedAt = null;
 let running = true;
 
@@ -106,7 +115,23 @@ async function tick() {
 
 async function main() {
   console.log(`[agent] starting — streamer=${process.env.STREAMER || "mock"}, poll=${POLL_INTERVAL_MS}ms`);
+
+  // Dashboard first, unconditionally — so config problems are visible on
+  // screen instead of a console window that flashes an error and vanishes.
   webserver.start({ state, streamer });
+  if (!process.env.AGENT_NO_AUTO_OPEN) {
+    setTimeout(() => openBrowser(`http://127.0.0.1:${WEB_PORT}`), 500);
+  }
+
+  try {
+    db = getFirestore(buildFirestoreApp());
+  } catch (err) {
+    console.error("[agent] FAILED TO START:", err.message);
+    state.update({ lastError: err.message, vmixConnected: false });
+    console.error("[agent] the dashboard is still up so you can see this error:");
+    console.error(`[agent]   http://127.0.0.1:${WEB_PORT}`);
+    return; // keep the process (and dashboard) alive; nothing to poll without a db
+  }
 
   for (const sig of ["SIGINT", "SIGTERM"]) {
     process.on(sig, () => {
