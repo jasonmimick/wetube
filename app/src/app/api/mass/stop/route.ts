@@ -28,9 +28,12 @@ export async function POST(req: NextRequest) {
       issuedBy: caller.name,
     });
 
+    const mass = snap.data();
     await adminDb.collection(ACTIVITY_LOG).add({
       action: "stop",
       massId,
+      title: mass?.title,
+      watchUrl: mass?.watchUrl,
       byUid: caller.uid,
       byName: caller.name,
       byRole: caller.role,

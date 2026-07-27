@@ -14,6 +14,7 @@ export interface Mass {
   watchUrl?: string;
   youtubeMocked?: boolean;
   lastError?: string;
+  createdAt?: string;
 }
 
 export function useMass(massId: string | null) {

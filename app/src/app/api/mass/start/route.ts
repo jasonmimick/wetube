@@ -45,6 +45,8 @@ export async function POST(req: NextRequest) {
     await adminDb.collection(ACTIVITY_LOG).add({
       action: "start",
       massId: massRef.id,
+      title,
+      watchUrl: broadcast.watchUrl,
       byUid: caller.uid,
       byName: caller.name,
       byRole: caller.role,

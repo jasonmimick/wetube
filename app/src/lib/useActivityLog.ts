@@ -9,6 +9,8 @@ export interface ActivityEntry {
   id: string;
   action: string;
   massId: string;
+  title?: string;
+  watchUrl?: string;
   byName: string;
   byRole: string;
   at: string;

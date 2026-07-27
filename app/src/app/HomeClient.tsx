@@ -6,6 +6,7 @@ import {
   signInWithPopup,
   signOut,
 } from "firebase/auth";
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebaseClient";
 import { useActivityLog } from "@/lib/useActivityLog";
@@ -31,6 +32,16 @@ function relativeTime(iso: string | undefined, now: number) {
   return `${Math.round(s / 3600)}h ago`;
 }
 
+function elapsed(iso: string | undefined, now: number) {
+  if (!iso) return "00:00";
+  const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
+}
+
 const YOUTUBE_CHANNEL_URL =
   process.env.NEXT_PUBLIC_YOUTUBE_CHANNEL_URL ||
   "https://www.youtube.com/channel/UCUtmH7wJ0FawlVbsWhLujSg";
@@ -41,26 +52,88 @@ function defaultTitle() {
     day: "numeric",
     year: "numeric",
   });
-  return `Mass — ${date}`;
+  return `Sunday Mass — ${date}`;
+}
+
+function ExternalLinkIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 17L17 7" />
+      <path d="M9 7h8v8" />
+    </svg>
+  );
 }
 
 function ChannelLink() {
   return (
-    <a
-      href={YOUTUBE_CHANNEL_URL}
-      target="_blank"
-      className="inline-flex items-center gap-1.5 text-sm text-indigo hover:underline"
-    >
-      Watch past Masses on our YouTube channel
-      <span aria-hidden>→</span>
+    <a href={YOUTUBE_CHANNEL_URL} target="_blank" className="bar-link">
+      Channel <ExternalLinkIcon />
     </a>
   );
 }
 
-function Mark() {
+function ThemeToggle() {
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  useEffect(() => {
+    const stored = localStorage.getItem("theme");
+    const initial = stored === "light" ? "light" : "dark";
+    setTheme(initial);
+    document.documentElement.setAttribute("data-theme", initial);
+  }, []);
+
+  function toggle() {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("theme", next);
+  }
+
   return (
-    <div className="relative h-9 w-9 flex-none rounded-lg bg-gradient-to-br from-indigo to-indigo-deep">
-      <span className="absolute inset-0 m-auto h-3 w-3 rounded-full bg-gold" style={{ top: "7px" }} />
+    <button className="theme-toggle" type="button" onClick={toggle} aria-label="Toggle light/dark theme">
+      {theme === "light" ? (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M20 14.5A8.5 8.5 0 019.5 4 8.5 8.5 0 1020 14.5z" /></svg>
+      ) : (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+      )}
+    </button>
+  );
+}
+
+function TopBar({ idToken, name, role }: { idToken: string | null; name: string | null; role: string | null }) {
+  const { online, loading } = useAgentStatus();
+  const agentOk = loading || online;
+  const initials = (name || "?")
+    .split(/\s+/)
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div className="topbar">
+      <div className="brand">
+        <Image src="/hmc-icon.png" alt="" width={26} height={31} unoptimized />
+        <span className="brand-name">Holy Mother &amp; Child</span>
+      </div>
+      <div className="right">
+        {agentOk ? (
+          <span className="chip live"><span className="dot" />Agent connected</span>
+        ) : (
+          <span className="chip off"><span className="dot" />Agent offline</span>
+        )}
+        {idToken && (
+          <span className="who">
+            <span className="avatar">{initials}</span>
+            <span className="who-text">
+              <strong>{name}</strong>
+              <small>{role}</small>
+            </span>
+          </span>
+        )}
+        <ChannelLink />
+        <ThemeToggle />
+      </div>
     </div>
   );
 }
@@ -70,6 +143,11 @@ function SignIn() {
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("theme");
+    document.documentElement.setAttribute("data-theme", stored === "light" ? "light" : "dark");
+  }, []);
 
   async function googleSignIn() {
     setError(null);
@@ -103,76 +181,62 @@ function SignIn() {
   return (
     <div className="mx-auto mt-16 max-w-sm space-y-8 px-4">
       <div className="flex items-center gap-3">
-        <Mark />
+        <Image src="/hmc-icon.png" alt="" width={36} height={43} unoptimized />
         <div>
-          <h1 className="font-heading text-base font-bold text-indigo-deep">Holy Mother and Child</h1>
-          <p className="text-xs tracking-wide text-gray-500 uppercase">Mass Control</p>
+          <h1 className="display text-base" style={{ color: "var(--wood)" }}>Holy Mother and Child</h1>
+          <p className="text-xs tracking-wide uppercase" style={{ color: "var(--wood-soft)" }}>Live Stream Control</p>
         </div>
       </div>
 
-      <button
-        onClick={googleSignIn}
-        className="w-full rounded-lg bg-indigo px-4 py-2.5 font-semibold text-white shadow-[0_6px_16px_-6px_rgba(86,86,175,0.55)]"
-      >
+      <button onClick={googleSignIn} className="solid-btn">
         Sign in with Google (Admin)
       </button>
 
-      <div className="text-center text-sm text-gray-400">— or —</div>
+      <div className="text-center text-sm" style={{ color: "var(--wood-soft)" }}>— or —</div>
 
       <form onSubmit={passcodeSignIn} className="space-y-3">
         <input
-          className="w-full rounded-lg border border-gray-200 bg-[#fafaff] px-3 py-2.5 focus:border-indigo focus:outline-none"
+          className="app-input"
           placeholder="Your name"
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
         />
         <input
-          className="w-full rounded-lg border border-gray-200 bg-[#fafaff] px-3 py-2.5 focus:border-indigo focus:outline-none"
+          className="app-input"
           placeholder="Passcode"
           value={passcode}
           onChange={(e) => setPasscode(e.target.value)}
           inputMode="numeric"
           required
         />
-        <button
-          disabled={busy}
-          className="w-full rounded-lg bg-indigo-deep px-4 py-2.5 font-semibold text-white disabled:opacity-50"
-        >
-          Enter as Mass Controller
+        <button disabled={busy} className="ghost-btn" style={{ width: "100%" }}>
+          Enter as Stream Controller
         </button>
       </form>
 
-      {error && <p className="text-sm text-brick">{error}</p>}
+      {error && <p className="text-sm" style={{ color: "var(--danger)" }}>{error}</p>}
 
-      <div className="border-t border-gray-100 pt-5 text-center">
+      <div className="pt-5 text-center" style={{ borderTop: "1px solid var(--line)" }}>
         <ChannelLink />
       </div>
     </div>
   );
 }
 
-function AgentBanner() {
-  const { status, online, loading } = useAgentStatus();
-  if (loading || online) return null;
-  return (
-    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-      Agent offline{status?.lastHeartbeatAt ? ` — last seen ${status.lastHeartbeatAt}` : ""}.
-      Starting a mass may not work right now.
-      {status?.lastError && <div className="mt-1 font-mono text-xs">{status.lastError}</div>}
-    </div>
-  );
-}
-
-function MassControls({ idToken }: { idToken: string }) {
+function RemoteControl({ idToken }: { idToken: string }) {
   const [activeMassId, setActiveMassId] = useState<string | null>(
     typeof window !== "undefined" ? localStorage.getItem("activeMassId") : null
   );
   const [title, setTitle] = useState(defaultTitle());
-  const [visibility, setVisibility] = useState<"public" | "unlisted" | "private">("public");
+  const [visibility, setVisibility] = useState<"public" | "private">("private");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mass = useMass(activeMassId);
+  const { status: agentStatus, online, loading } = useAgentStatus();
+  const now = useNow();
+  const agentOk = loading || online;
+  const isLive = !!mass && mass.status !== "ended";
 
   async function start() {
     setBusy(true);
@@ -219,86 +283,107 @@ function MassControls({ idToken }: { idToken: string }) {
     }
   }
 
-  function endSession() {
-    localStorage.removeItem("activeMassId");
-    setActiveMassId(null);
-  }
-
-  if (!mass || mass.status === "ended") {
-    return (
-      <div className="space-y-4 rounded-xl border border-gray-100 bg-white p-5 shadow-[0_1px_2px_rgba(32,32,111,0.05)]">
-        <h2 className="font-heading font-bold text-indigo-deep">Start a New Mass</h2>
-        <div>
-          <label className="mb-1 block text-xs font-bold tracking-wide text-gray-500 uppercase">Title</label>
-          <input
-            className="w-full rounded-lg border border-gray-200 bg-[#fafaff] px-3 py-2.5 focus:border-indigo focus:outline-none"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-bold tracking-wide text-gray-500 uppercase">Visibility</label>
-          <select
-            className="w-full rounded-lg border border-gray-200 bg-[#fafaff] px-3 py-2.5 focus:border-indigo focus:outline-none"
-            value={visibility}
-            onChange={(e) => setVisibility(e.target.value as typeof visibility)}
-          >
-            <option value="public">Public</option>
-            <option value="unlisted">Unlisted</option>
-            <option value="private">Private</option>
-          </select>
-        </div>
-        <button
-          onClick={start}
-          disabled={busy}
-          className="w-full rounded-lg bg-indigo px-4 py-2.5 font-semibold text-white shadow-[0_6px_16px_-6px_rgba(86,86,175,0.55)] disabled:opacity-50"
-        >
-          Go
-        </button>
-        {error && <p className="text-sm text-brick">{error}</p>}
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-4 rounded-xl border border-gray-100 bg-white p-5 shadow-[0_1px_2px_rgba(32,32,111,0.05)]">
-      <h2 className="font-heading font-bold text-indigo-deep">Current Stream</h2>
-      <div className="flex flex-wrap items-center gap-2">
-        {mass.status === "live" ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-2.5 py-1 text-xs font-extrabold tracking-wide text-[#93691f] uppercase">
-            <span className="h-1.5 w-1.5 rounded-full bg-gold" />
-            Live
-          </span>
+    <div className="hero-card">
+      <div className="remote">
+        <span className="model">◉ WT&#8209;1 · Stream Remote</span>
+
+        {isLive ? (
+          <div className="lcd rec">
+            <div className="status-line"><span className="blink">●</span> REC <span className="tabular">{elapsed(mass?.createdAt, now)}</span></div>
+            <div className="sub-line">{mass?.title}</div>
+          </div>
+        ) : agentOk ? (
+          <div className="lcd ready">
+            <div className="status-line">STANDBY</div>
+            <div className="sub-line">Ready to go live</div>
+          </div>
         ) : (
-          <span className="rounded-full bg-gray-100 px-2.5 py-1 font-mono text-xs text-gray-600">{mass.status}</span>
+          <div className="lcd dead">
+            <div className="status-line">NO SIGNAL</div>
+            <div className="sub-line">Church PC unreachable</div>
+          </div>
         )}
-        {mass.youtubeMocked && (
-          <span className="rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">
-            mock mode — no real YouTube credentials configured
-          </span>
+
+        {!isLive && (
+          <>
+            <div className="plate">
+              <label>Title for next broadcast</label>
+              <div className="field-wrap">
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  aria-label="Title for the broadcast that starts when you press Go Live"
+                />
+                <svg className="edit-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z" />
+                </svg>
+              </div>
+            </div>
+            <div className="plate">
+              <label>Visibility</label>
+              <button
+                type="button"
+                className="viz-switch"
+                data-value={visibility}
+                onClick={() => setVisibility((v) => (v === "private" ? "public" : "private"))}
+                aria-label={`Visibility: ${visibility === "private" ? "Private" : "Public"}. Click to switch.`}
+              >
+                <span className="thumb" />
+                <span className="opt priv">Private</span>
+                <span className="opt pub">Public</span>
+              </button>
+            </div>
+          </>
         )}
+
+        {isLive ? (
+          <button className="big-btn live" onClick={stop} disabled={busy || mass?.status === "stopping"}>
+            <span className="ring" />Stop
+          </button>
+        ) : agentOk ? (
+          <button className="big-btn ready" onClick={start} disabled={busy}>
+            <span className="ring" />Go Live
+          </button>
+        ) : (
+          <button className="big-btn disabled" disabled>
+            <span className="ring" />Go Live
+          </button>
+        )}
+
+        <div className="leds">
+          <div className="led"><span className={`bulb ${agentOk ? "on" : "off"}`} /><small>Agent</small></div>
+          <div className="led"><span className={`bulb ${agentStatus?.vmixConnected ? "on" : "off"}`} /><small>vMix</small></div>
+          <div className="led"><span className={`bulb ${mass?.status === "live" ? "warn" : "off"}`} /><small>On Air</small></div>
+        </div>
+
+        <span className="serial">Holy Mother &amp; Child · Ch. 1</span>
       </div>
-      {mass.embedUrl && !mass.youtubeMocked && (
-        <iframe className="aspect-video w-full rounded-lg" src={mass.embedUrl} allowFullScreen />
+
+      {isLive && (
+        <div className="remote-tv">
+          {mass?.embedUrl && !mass.youtubeMocked && (
+            <div className="video-embed">
+              <iframe src={mass.embedUrl} allowFullScreen />
+            </div>
+          )}
+          {mass?.youtubeMocked && (
+            <p className="sub" style={{ textAlign: "center" }}>mock mode — no real YouTube credentials configured</p>
+          )}
+          {mass?.watchUrl && (
+            <div className="live-strip">
+              <span>Watching on YouTube</span>
+              <a href={mass.watchUrl} target="_blank" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                Open stream <ExternalLinkIcon />
+              </a>
+            </div>
+          )}
+        </div>
       )}
-      {mass.watchUrl && (
-        <a className="block text-sm text-indigo underline" href={mass.watchUrl} target="_blank">
-          {mass.watchUrl}
-        </a>
-      )}
-      <button
-        onClick={stop}
-        disabled={busy || mass.status === "stopping" || mass.status === "ended"}
-        className="w-full rounded-lg border-1.5 border-brick px-4 py-2.5 font-semibold text-brick disabled:opacity-50"
-      >
-        Stop
-      </button>
-      {mass.status === "ended" && (
-        <button onClick={endSession} className="w-full rounded-lg border border-gray-200 px-4 py-2.5">
-          Start Another Mass
-        </button>
-      )}
-      {error && <p className="text-sm text-brick">{error}</p>}
+
+      {error && <p className="text-sm" style={{ color: "var(--danger)" }}>{error}</p>}
     </div>
   );
 }
@@ -306,41 +391,32 @@ function MassControls({ idToken }: { idToken: string }) {
 function HeartbeatMonitor() {
   const { status, online, loading } = useAgentStatus();
   const now = useNow();
-  const label = loading ? "Checking…" : online ? "Online" : "Offline";
-  const tone = loading ? "gray" : online ? "gold" : "brick";
 
   return (
-    <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-5 shadow-[0_1px_2px_rgba(32,32,111,0.05)]">
-      <div className="flex items-center justify-between">
-        <h2 className="font-heading font-bold text-indigo-deep">Church PC Agent</h2>
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold tracking-wide uppercase ${
-            tone === "gold" ? "bg-gold/15 text-[#93691f]" : tone === "brick" ? "bg-brick/10 text-brick" : "bg-gray-100 text-gray-500"
-          }`}
-        >
-          <span className={`h-1.5 w-1.5 rounded-full ${tone === "gold" ? "bg-gold" : tone === "brick" ? "bg-brick" : "bg-gray-400"}`} />
-          {label}
-        </span>
+    <div className="card">
+      <h2>Heartbeat Monitor</h2>
+      <p className="sub">Church PC agent status</p>
+      <div className="heartbeat-grid">
+        <div className="metric">
+          <div className="k">vMix</div>
+          <div className={`v ${status?.vmixConnected ? "ok" : "bad"}`}>
+            {status?.vmixConnected === undefined ? "—" : status.vmixConnected ? "Connected" : "Disconnected"}
+          </div>
+        </div>
+        <div className="metric">
+          <div className="k">Streaming</div>
+          <div className="v">{status?.streaming ? "Yes" : "No"}</div>
+        </div>
+        <div className="metric" style={{ gridColumn: "span 2" }}>
+          <div className="k">Last heartbeat</div>
+          <div className={`v tabular ${loading || online ? "" : "bad"}`}>{relativeTime(status?.lastHeartbeatAt, now)}</div>
+        </div>
       </div>
-      <dl className="space-y-1.5 text-sm">
-        <div className="flex justify-between">
-          <dt className="text-gray-500">Last heartbeat</dt>
-          <dd>{relativeTime(status?.lastHeartbeatAt, now)}</dd>
-        </div>
-        <div className="flex justify-between">
-          <dt className="text-gray-500">vMix connected</dt>
-          <dd>{status?.vmixConnected === undefined ? "—" : status.vmixConnected ? "Yes" : "No"}</dd>
-        </div>
-        <div className="flex justify-between">
-          <dt className="text-gray-500">Streaming</dt>
-          <dd>{status?.streaming ? "Yes" : "No"}</dd>
-        </div>
-      </dl>
       {status?.lastError && (
-        <p className="rounded-md bg-red-50 p-2 font-mono text-xs text-red-800">{status.lastError}</p>
+        <p className="code-pill" style={{ marginTop: 12, color: "var(--danger)", display: "block" }}>{status.lastError}</p>
       )}
-      {!online && (
-        <p className="text-xs text-gray-500">
+      {!loading && !online && (
+        <p className="sub" style={{ marginTop: 10, marginBottom: 0 }}>
           No heartbeat in over 90s — the church PC agent may be off or unreachable.
         </p>
       )}
@@ -353,19 +429,27 @@ function ActivityLog() {
   const now = useNow(30000);
 
   return (
-    <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-5 shadow-[0_1px_2px_rgba(32,32,111,0.05)]">
-      <h2 className="font-heading font-bold text-indigo-deep">Activity Log</h2>
+    <div className="card">
+      <h2>Activity Log</h2>
+      <p className="sub">Who started or stopped the broadcast</p>
       {entries.length === 0 ? (
-        <p className="text-sm text-gray-500">Nothing yet.</p>
+        <p className="sub" style={{ marginBottom: 0 }}>Nothing yet.</p>
       ) : (
-        <ul className="divide-y divide-gray-100">
+        <ul className="log">
           {entries.map((e) => (
-            <li key={e.id} className="flex items-center justify-between py-2 text-sm">
+            <li key={e.id}>
               <span>
-                <span className="font-semibold capitalize text-indigo-deep">{e.action}</span>
-                <span className="text-gray-500"> by {e.byName}</span>
+                <span className={`action ${e.action}`}>{e.action}</span>{" "}
+                {e.title ? (
+                  e.watchUrl ? (
+                    <a className="title" href={e.watchUrl} target="_blank" rel="noreferrer">{e.title}</a>
+                  ) : (
+                    <span>{e.title}</span>
+                  )
+                ) : null}
+                <span className="who-name"> by {e.byName}</span>
               </span>
-              <span className="text-xs text-gray-400">{relativeTime(e.at, now)}</span>
+              <time>{relativeTime(e.at, now)}</time>
             </li>
           ))}
         </ul>
@@ -393,19 +477,16 @@ function AdminPanel({ idToken }: { idToken: string }) {
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-5 shadow-[0_1px_2px_rgba(32,32,111,0.05)]">
-      <h2 className="font-heading font-bold text-indigo-deep">Admin</h2>
-      <button
-        onClick={generate}
-        disabled={busy}
-        className="w-full rounded-lg border border-gray-200 px-4 py-2.5 font-semibold disabled:opacity-50"
-      >
-        Generate new Mass Controller passcode
+    <div className="card">
+      <h2>Admin</h2>
+      <p className="sub">Rotate the shared Stream Controller passcode</p>
+      <button onClick={generate} disabled={busy} className="ghost-btn" style={{ width: "100%" }}>
+        Generate new passcode
       </button>
       {passcode && (
-        <div className="rounded-lg border-1.5 border-dashed border-indigo bg-[#fafaff] p-3 text-center">
-          <p className="font-mono text-2xl font-semibold tracking-[0.14em] text-indigo-deep">{passcode}</p>
-          <p className="mt-1 text-xs text-gray-500">Share this once — it won&apos;t be shown again.</p>
+        <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span className="code-pill">{passcode}</span>
+          <span className="sub" style={{ margin: 0 }}>Share this once — it won&apos;t be shown again.</span>
         </div>
       )}
     </div>
@@ -423,10 +504,8 @@ export default function HomeClient() {
     return (
       <div className="mx-auto mt-16 max-w-sm space-y-4 text-center px-4">
         <p>Signed in as {name}, but no role is assigned yet.</p>
-        <p className="text-sm text-gray-500">Ask an admin to grant access.</p>
-        <button onClick={() => signOut(auth)} className="rounded-lg border border-gray-200 px-4 py-2">
-          Sign out
-        </button>
+        <p className="sub">Ask an admin to grant access.</p>
+        <button onClick={() => signOut(auth)} className="ghost-btn">Sign out</button>
       </div>
     );
   }
@@ -434,25 +513,30 @@ export default function HomeClient() {
   user?.getIdToken().then(setIdToken);
 
   return (
-    <div className="mx-auto mt-8 max-w-md space-y-5 px-4 pb-16">
-      <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
-        <Mark />
-        <div className="min-w-0 flex-1">
-          <h1 className="font-heading truncate font-bold text-indigo-deep">Holy Mother and Child</h1>
-          <p className="text-xs tracking-wide text-gray-500 uppercase">Mass Control</p>
+    <div>
+      <TopBar idToken={idToken} name={name} role={role === "admin" ? "Admin" : "Stream Controller"} />
+
+      <div className="page-header">
+        <div>
+          <p className="eyebrow">Holy Mother &amp; Child</p>
+          <h1 className="display">Live Stream Remote Control</h1>
         </div>
-        <button onClick={() => signOut(auth)} className="text-sm whitespace-nowrap text-gray-500 underline">
-          Sign out
-        </button>
+        <Image className="emblem" src="/hmc-emblem.png" alt="Our Mother of Good Counsel" width={200} height={236} unoptimized />
       </div>
 
-      <ChannelLink />
-
-      <AgentBanner />
-      {idToken && <MassControls idToken={idToken} />}
-      {role === "admin" && <HeartbeatMonitor />}
-      {role === "admin" && idToken && <AdminPanel idToken={idToken} />}
-      {role === "admin" && <ActivityLog />}
+      <main className="app-main">
+        <div className="stack">
+          {idToken && <RemoteControl idToken={idToken} />}
+          {role === "admin" && <ActivityLog />}
+        </div>
+        <div className="stack">
+          {role === "admin" && <HeartbeatMonitor />}
+          {role === "admin" && idToken && <AdminPanel idToken={idToken} />}
+          <button onClick={() => signOut(auth)} className="ghost-btn" style={{ width: "100%" }}>
+            Sign out
+          </button>
+        </div>
+      </main>
     </div>
   );
 }
