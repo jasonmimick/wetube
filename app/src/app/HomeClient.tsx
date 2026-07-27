@@ -311,6 +311,12 @@ function RemoteControl({ idToken }: { idToken: string }) {
           </div>
         )}
 
+        <div className="leds">
+          <div className="led"><span className={`bulb ${agentOk ? "on" : "off"}`} /><small>Agent</small></div>
+          <div className="led"><span className={`bulb ${agentStatus?.vmixConnected ? "on" : "off"}`} /><small>vMix</small></div>
+          <div className="led"><span className={`bulb ${mass?.status === "live" ? "warn" : "off"}`} /><small>On Air</small></div>
+        </div>
+
         {!isLive && (
           <>
             <div className="plate">
@@ -358,12 +364,6 @@ function RemoteControl({ idToken }: { idToken: string }) {
             <span className="ring" />Go Live
           </button>
         )}
-
-        <div className="leds">
-          <div className="led"><span className={`bulb ${agentOk ? "on" : "off"}`} /><small>Agent</small></div>
-          <div className="led"><span className={`bulb ${agentStatus?.vmixConnected ? "on" : "off"}`} /><small>vMix</small></div>
-          <div className="led"><span className={`bulb ${mass?.status === "live" ? "warn" : "off"}`} /><small>On Air</small></div>
-        </div>
 
         <span className="serial">Holy Mother &amp; Child · Ch. 1</span>
       </div>
