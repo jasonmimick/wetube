@@ -149,11 +149,64 @@ function TopBar({ idToken, name, role }: { idToken: string | null; name: string 
   );
 }
 
+function EditIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z" />
+    </svg>
+  );
+}
+
+function StepDevice({
+  lcd,
+  status,
+  hlLcd,
+  hlLeds,
+  hlPlate,
+  hlSwitch,
+  hlKnob,
+  live,
+}: {
+  lcd: "standby" | "rec";
+  status: string;
+  hlLcd?: boolean;
+  hlLeds?: boolean;
+  hlPlate?: boolean;
+  hlSwitch?: boolean;
+  hlKnob?: boolean;
+  live?: boolean;
+}) {
+  return (
+    <div className="device">
+      <div className={`lcd ${lcd}${hlLcd ? " hl" : ""}`}>
+        <div className="status">{status}</div>
+      </div>
+      <div className={`leds${hlLeds ? " hl" : ""}`}><i /><i /></div>
+      {lcd === "standby" && (
+        <>
+          <div className={`plate${hlPlate ? " hl" : ""}`}>
+            <div className="line" />
+            {hlPlate && <EditIcon />}
+          </div>
+          <div className={`switch${hlSwitch ? " hl" : ""}`}>
+            <span className="on">Private</span><span>Public</span>
+          </div>
+        </>
+      )}
+      <div className="knob-row">
+        <div className={`knob${live ? " live" : ""}${hlKnob ? " hl" : ""}`} />
+      </div>
+    </div>
+  );
+}
+
 function SignIn() {
   const [name, setName] = useState("");
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showPasscode, setShowPasscode] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("theme");
@@ -190,47 +243,83 @@ function SignIn() {
   }
 
   return (
-    <div className="mx-auto mt-16 max-w-sm space-y-8 px-4">
-      <div className="flex items-center gap-3">
-        <Image src="/hmc-icon.png" alt="" width={36} height={43} unoptimized />
-        <div>
-          <h1 className="display text-base" style={{ color: "var(--wood)" }}>Holy Mother and Child</h1>
-          <p className="text-xs tracking-wide uppercase" style={{ color: "var(--wood-soft)" }}>Live Stream Control</p>
+    <div className="landing">
+      <header>
+        <p className="kicker">Holy Mother &amp; Child</p>
+        <h1 className="display">Live Stream Remote Control</h1>
+        <p className="sub">Start and stop the Mass livestream right from your phone.</p>
+      </header>
+
+      <div className="cta-row">
+        <button className="primary" onClick={googleSignIn}>
+          Sign in with Google
+        </button>
+        <button className="secondary" onClick={() => setShowPasscode((v) => !v)}>
+          Enter with passcode
+        </button>
+      </div>
+
+      {showPasscode && (
+        <form onSubmit={passcodeSignIn} className="passcode-form">
+          <input
+            className="app-input"
+            placeholder="Your name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <input
+            className="app-input"
+            placeholder="Passcode"
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            inputMode="numeric"
+            required
+          />
+          <button disabled={busy} className="ghost-btn">
+            Enter as Stream Controller
+          </button>
+        </form>
+      )}
+
+      {error && <p className="text-sm" style={{ color: "var(--danger)", textAlign: "center", marginTop: 10 }}>{error}</p>}
+
+      <div className="divider">How it works</div>
+
+      <div className="steps">
+        <div className="step">
+          <div className="num">1</div>
+          <div className="icon-box"><StepDevice lcd="standby" status="STANDBY" hlLeds /></div>
+          <p className="caption">Both lights on?<span>Good to go</span></p>
+        </div>
+        <div className="step">
+          <div className="num">2</div>
+          <div className="icon-box"><StepDevice lcd="standby" status="STANDBY" hlPlate /></div>
+          <p className="caption">Name it<span>Auto-fills — tap to change</span></p>
+        </div>
+        <div className="step">
+          <div className="num">3</div>
+          <div className="icon-box"><StepDevice lcd="standby" status="STANDBY" hlSwitch /></div>
+          <p className="caption">Slide the switch<span>Private to test, Public for real</span></p>
+        </div>
+        <div className="step">
+          <div className="num">4</div>
+          <div className="icon-box"><StepDevice lcd="standby" status="STANDBY" hlKnob /></div>
+          <p className="caption">Press to go live</p>
+        </div>
+        <div className="step">
+          <div className="num">5</div>
+          <div className="icon-box"><StepDevice lcd="rec" status="● REC" hlLcd live /></div>
+          <p className="caption">You're live<span>Press again when done</span></p>
         </div>
       </div>
 
-      <button onClick={googleSignIn} className="solid-btn">
-        Sign in with Google (Admin)
-      </button>
-
-      <div className="text-center text-sm" style={{ color: "var(--wood-soft)" }}>— or —</div>
-
-      <form onSubmit={passcodeSignIn} className="space-y-3">
-        <input
-          className="app-input"
-          placeholder="Your name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-        <input
-          className="app-input"
-          placeholder="Passcode"
-          value={passcode}
-          onChange={(e) => setPasscode(e.target.value)}
-          inputMode="numeric"
-          required
-        />
-        <button disabled={busy} className="ghost-btn" style={{ width: "100%" }}>
-          Enter as Stream Controller
-        </button>
-      </form>
-
-      {error && <p className="text-sm" style={{ color: "var(--danger)" }}>{error}</p>}
-
-      <div className="pt-5 text-center" style={{ borderTop: "1px solid var(--line)" }}>
-        <ChannelLink />
-      </div>
+      <footer>
+        <div className="num done">✓</div>
+        <div style={{ marginTop: 14 }}>
+          <ChannelLink />
+        </div>
+      </footer>
     </div>
   );
 }
