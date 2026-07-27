@@ -32,6 +32,15 @@ function relativeTime(iso: string | undefined, now: number) {
   return `${Math.round(s / 3600)}h ago`;
 }
 
+function clockTime(iso: string | undefined) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 function elapsed(iso: string | undefined, now: number) {
   if (!iso) return "00:00";
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
@@ -406,7 +415,12 @@ function HeartbeatMonitor() {
         </div>
         <div className="metric" style={{ gridColumn: "span 2" }}>
           <div className="k">Last heartbeat</div>
-          <div className={`v tabular ${loading || online ? "" : "bad"}`}>{relativeTime(status?.lastHeartbeatAt, now)}</div>
+          <div className={`v tabular ${loading || online ? "" : "bad"}`}>
+            {relativeTime(status?.lastHeartbeatAt, now)}
+            {clockTime(status?.lastHeartbeatAt) && (
+              <span style={{ fontWeight: 400, color: "var(--wood-soft)" }}> · {clockTime(status?.lastHeartbeatAt)}</span>
+            )}
+          </div>
         </div>
       </div>
       {status?.lastError && (
