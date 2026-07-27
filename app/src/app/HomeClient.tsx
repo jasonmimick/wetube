@@ -47,12 +47,14 @@ const YOUTUBE_CHANNEL_URL =
   "https://www.youtube.com/channel/UCUtmH7wJ0FawlVbsWhLujSg";
 
 function defaultTitle() {
-  const date = new Date().toLocaleDateString("en-US", {
+  const now = new Date();
+  const date = now.toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
     year: "numeric",
   });
-  return `Sunday Mass — ${date}`;
+  const label = now.getDay() === 0 ? "Sunday Mass" : "Daily Mass";
+  return `${label} — ${date}`;
 }
 
 function ExternalLinkIcon() {
