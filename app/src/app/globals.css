@@ -58,7 +58,13 @@ a.bar-link { display: inline-flex; align-items: center; gap: 5px; color: var(--i
 a.bar-link:hover { color: var(--indigo-deep); }
 a.bar-link svg { flex-shrink: 0; }
 
-.who { display: flex; align-items: center; gap: 9px; padding-left: 13px; border-left: 1px solid var(--line); }
+.who {
+  display: flex; align-items: center; gap: 9px; padding-left: 13px; border-left: 1px solid var(--line);
+  background: transparent; border-top: none; border-right: none; border-bottom: none; cursor: pointer;
+  color: var(--wood-soft);
+}
+.who:hover { color: var(--danger); }
+.who:hover .who-text strong { color: var(--danger); }
 .who .avatar {
   width: 27px; height: 27px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
   background: var(--indigo); color: #fff; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.01em;

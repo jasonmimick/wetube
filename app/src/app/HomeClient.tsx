@@ -134,13 +134,18 @@ function TopBar({ idToken, name, role }: { idToken: string | null; name: string 
           <span className="chip off"><span className="dot" />Agent offline</span>
         )}
         {idToken && (
-          <span className="who">
+          <button className="who" onClick={() => signOut(auth)} title="Sign out" aria-label={`Signed in as ${name}. Click to sign out.`}>
             <span className="avatar">{initials}</span>
             <span className="who-text">
               <strong>{name}</strong>
               <small>{role}</small>
             </span>
-          </span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+              <path d="M16 17l5-5-5-5" />
+              <path d="M21 12H9" />
+            </svg>
+          </button>
         )}
         <ChannelLink />
         <ThemeToggle />
@@ -244,6 +249,9 @@ function SignIn() {
 
   return (
     <div className="landing">
+      <div style={{ position: "fixed", top: 14, right: 14, zIndex: 10 }}>
+        <ThemeToggle />
+      </div>
       <header>
         <p className="kicker">Holy Mother &amp; Child</p>
         <h1 className="display">Live Stream Remote Control</h1>
@@ -632,9 +640,6 @@ export default function HomeClient() {
         <div className="stack">
           {role === "admin" && <HeartbeatMonitor />}
           {role === "admin" && idToken && <AdminPanel idToken={idToken} />}
-          <button onClick={() => signOut(auth)} className="ghost-btn" style={{ width: "100%" }}>
-            Sign out
-          </button>
         </div>
       </main>
     </div>
