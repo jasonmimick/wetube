@@ -21,7 +21,11 @@ controls (mic mute).
 Three separate deployables, each with its own `package.json`/`node_modules`,
 plus root-level dev/test tooling:
 
-- `app/` — Next.js (App Router, TS) control panel. Deploys to Cloud Run.
+- `app/` — Next.js (App Router, TS) control panel. Deploys to **Vercel**
+  (GitHub integration — `git push origin master` triggers a production
+  build automatically; never run `vercel --prod` manually). Firestore/Auth
+  backend still lives on GCP/Firebase; only the web app itself moved off
+  Cloud Run to Vercel after early friction with Cloud Run deploys.
 - `agent/` — plain Node.js process that runs **on the church PC**. Polls
   Firestore for start/stop commands and drives vMix's local HTTP API (or
   OBS/mock, via a pluggable adapter — see `agent/streamers/`). Serves a
@@ -51,6 +55,40 @@ cd agent && npm run build:mac   # build a macOS executable for local testing of 
 Running the Firestore emulator requires a JRE on PATH — if `java -version`
 fails but Homebrew has `openjdk` installed, prepend it:
 `export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"`.
+
+## Design system (app/)
+
+The control UI is built around the parish's own devotional icon — *Our
+Mother of Good Counsel* (`app/public/hmc-icon.png` small crop,
+`hmc-emblem.png` larger crop) — rather than generic styling. Key decisions,
+so a future redesign doesn't have to rediscover them:
+
+- **Dark-first, not light-first.** `globals.css` defines the dark palette
+  directly in `:root` (unconditional default) and the light palette under
+  `:root[data-theme="light"]`. This was deliberate: gating the dark theme
+  behind `prefers-color-scheme` meant most users never saw it. The toggle
+  button in the top bar flips `data-theme` on `<html>` and persists to
+  `localStorage`.
+- **Fonts**: Fraunces (display/headlines) + Manrope (everything else), both
+  via `next/font/google` in `layout.tsx` — exposed as `--font-display` /
+  `--font-body` and consumed in `globals.css`. Georgia/system-serif reads as
+  dated; don't revert to it.
+- **The stream control card is a stylized physical remote control**
+  (`.remote` in `globals.css`, `RemoteControl` in `HomeClient.tsx`) — LCD
+  status readout (STANDBY / REC + elapsed time / NO SIGNAL), a slide switch
+  for Private/Public visibility (defaults to **Private**, no Unlisted
+  option — removed on purpose, not an oversight), a big circular Go
+  Live/Stop button, and status LEDs (Agent/vMix/On Air). This was an
+  explicit design pivot away from a generic card-based dashboard look.
+- **No fake/decorative data.** An earlier draft had a sparkline chart on the
+  heartbeat monitor; it was dropped before shipping because there's no real
+  historical heartbeat time-series stored anywhere — a fake chart on a
+  live operational monitor for a real broadcast system would be actively
+  misleading. If real heartbeat history ever gets stored, that's the place
+  to reintroduce it.
+- Design was iterated as a shareable Claude Artifact mockup first, then
+  ported into the real app once approved — see git log around "Redesign
+  control UI" for the before/after.
 
 ## Gotchas hit during the POC build
 

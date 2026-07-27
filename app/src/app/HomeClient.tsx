@@ -12,7 +12,7 @@ import { auth } from "@/lib/firebaseClient";
 import { useActivityLog } from "@/lib/useActivityLog";
 import { useAgentStatus } from "@/lib/useAgentStatus";
 import { useAuthedUser } from "@/lib/useAuthedUser";
-import { useMass } from "@/lib/useMass";
+import { useActiveMass } from "@/lib/useMass";
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
@@ -225,18 +225,15 @@ function SignIn() {
 }
 
 function RemoteControl({ idToken }: { idToken: string }) {
-  const [activeMassId, setActiveMassId] = useState<string | null>(
-    typeof window !== "undefined" ? localStorage.getItem("activeMassId") : null
-  );
   const [title, setTitle] = useState(defaultTitle());
   const [visibility, setVisibility] = useState<"public" | "private">("private");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const mass = useMass(activeMassId);
+  const { mass } = useActiveMass();
   const { status: agentStatus, online, loading } = useAgentStatus();
   const now = useNow();
   const agentOk = loading || online;
-  const isLive = !!mass && mass.status !== "ended";
+  const isLive = !!mass;
 
   async function start() {
     setBusy(true);
@@ -252,8 +249,6 @@ function RemoteControl({ idToken }: { idToken: string }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to start");
-      localStorage.setItem("activeMassId", data.massId);
-      setActiveMassId(data.massId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start");
     } finally {
@@ -262,7 +257,7 @@ function RemoteControl({ idToken }: { idToken: string }) {
   }
 
   async function stop() {
-    if (!activeMassId) return;
+    if (!mass) return;
     setBusy(true);
     setError(null);
     try {
@@ -272,7 +267,7 @@ function RemoteControl({ idToken }: { idToken: string }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${idToken}`,
         },
-        body: JSON.stringify({ massId: activeMassId }),
+        body: JSON.stringify({ massId: mass.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to stop");
