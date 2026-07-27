@@ -153,8 +153,8 @@ function SignIn() {
 }
 
 function AgentBanner() {
-  const { status, online } = useAgentStatus();
-  if (online) return null;
+  const { status, online, loading } = useAgentStatus();
+  if (loading || online) return null;
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
       Agent offline{status?.lastHeartbeatAt ? ` — last seen ${status.lastHeartbeatAt}` : ""}.
@@ -304,8 +304,10 @@ function MassControls({ idToken }: { idToken: string }) {
 }
 
 function HeartbeatMonitor() {
-  const { status, online } = useAgentStatus();
+  const { status, online, loading } = useAgentStatus();
   const now = useNow();
+  const label = loading ? "Checking…" : online ? "Online" : "Offline";
+  const tone = loading ? "gray" : online ? "gold" : "brick";
 
   return (
     <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-5 shadow-[0_1px_2px_rgba(32,32,111,0.05)]">
@@ -313,11 +315,11 @@ function HeartbeatMonitor() {
         <h2 className="font-heading font-bold text-indigo-deep">Church PC Agent</h2>
         <span
           className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold tracking-wide uppercase ${
-            online ? "bg-gold/15 text-[#93691f]" : "bg-brick/10 text-brick"
+            tone === "gold" ? "bg-gold/15 text-[#93691f]" : tone === "brick" ? "bg-brick/10 text-brick" : "bg-gray-100 text-gray-500"
           }`}
         >
-          <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-gold" : "bg-brick"}`} />
-          {online ? "Online" : "Offline"}
+          <span className={`h-1.5 w-1.5 rounded-full ${tone === "gold" ? "bg-gold" : tone === "brick" ? "bg-brick" : "bg-gray-400"}`} />
+          {label}
         </span>
       </div>
       <dl className="space-y-1.5 text-sm">

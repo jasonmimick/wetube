@@ -16,11 +16,13 @@ const STALE_AFTER_MS = 90_000;
 
 export function useAgentStatus() {
   const [status, setStatus] = useState<AgentStatus | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const [collection, id] = AGENT_STATUS_DOC.split("/");
     return onSnapshot(doc(db, collection, id), (snap) => {
       setStatus(snap.exists() ? (snap.data() as AgentStatus) : null);
+      setLoading(false);
     });
   }, []);
 
@@ -28,5 +30,5 @@ export function useAgentStatus() {
     !!status?.lastHeartbeatAt &&
     Date.now() - new Date(status.lastHeartbeatAt).getTime() < STALE_AFTER_MS;
 
-  return { status, online };
+  return { status, online, loading };
 }
