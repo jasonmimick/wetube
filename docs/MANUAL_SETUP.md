@@ -198,9 +198,21 @@ than plain env vars — fine to defer for the POC.
      GOOGLE_APPLICATION_CREDENTIALS=wetube-agent-key.json \
      node scripts/setup/grant-email-access.mjs their@email.com controller "Their Name"
    ```
-   Test with your own alias first, not their real address — click "Have an
-   email invite?" on the sign-in screen, confirm the emailed link actually
-   signs you in with the right role, *then* grant the real person's email.
+   Test with your own alias first, not their real address — click "Sign in
+   by email instead" on the sign-in screen, confirm the emailed link
+   actually signs you in with the right role, *then* grant the real
+   person's email.
+
+   Two gotchas hit during the first real test (2026-07-28):
+   - **`auth/operation-not-allowed`** — Authentication → Sign-in method →
+     Email/Password has two separate toggles; enabling "Email/Password"
+     alone isn't enough, "Email link (passwordless sign-in)" underneath it
+     also has to be on, and actually saved.
+   - **The email lands in spam** — Firebase's default sender
+     (`noreply@<project>.firebaseapp.com`) has no sending reputation of its
+     own. First-time recipients (this very much includes the pastor) should
+     be told in advance to check spam/junk, at least until Firebase sends
+     enough mail to that address to stop being filtered.
 
 ## Phase 8 — church PC agent (one-stop install, no Node.js needed)
 
