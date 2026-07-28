@@ -2,7 +2,10 @@
 
 import {
   GoogleAuthProvider,
+  isSignInWithEmailLink,
+  sendSignInLinkToEmail,
   signInWithCustomToken,
+  signInWithEmailLink,
   signInWithPopup,
   signOut,
 } from "firebase/auth";
@@ -206,16 +209,59 @@ function StepDevice({
   );
 }
 
+const EMAIL_LINK_STORAGE_KEY = "wetube_emailForSignIn";
+
 function SignIn() {
   const [name, setName] = useState("");
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showPasscode, setShowPasscode] = useState(false);
+  const [showEmailLink, setShowEmailLink] = useState(false);
+  const [emailLinkAddress, setEmailLinkAddress] = useState("");
+  const [emailLinkSent, setEmailLinkSent] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("theme");
     document.documentElement.setAttribute("data-theme", stored === "light" ? "light" : "dark");
+  }, []);
+
+  // Completes an in-progress email-link sign-in when the user lands back
+  // here after clicking the link Firebase emailed them.
+  useEffect(() => {
+    if (!isSignInWithEmailLink(auth, window.location.href)) return;
+
+    let email = localStorage.getItem(EMAIL_LINK_STORAGE_KEY);
+    if (!email) {
+      email = window.prompt("Confirm the email you signed in with:");
+    }
+    if (!email) return;
+
+    (async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        const cred = await signInWithEmailLink(auth, email!, window.location.href);
+        localStorage.removeItem(EMAIL_LINK_STORAGE_KEY);
+        window.history.replaceState(null, "", window.location.pathname);
+
+        const idToken = await cred.user.getIdToken();
+        const res = await fetch("/api/auth/email-link/claim", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          await signOut(auth);
+          throw new Error(data.error || "This email isn't authorized for sign-in.");
+        }
+        await cred.user.getIdToken(true); // pick up the new role claim
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Email-link sign-in failed.");
+      } finally {
+        setBusy(false);
+      }
+    })();
   }, []);
 
   async function googleSignIn() {
@@ -242,6 +288,25 @@ function SignIn() {
       await signInWithCustomToken(auth, data.token);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function emailLinkSignIn(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const actionCodeSettings = {
+        url: window.location.href,
+        handleCodeInApp: true,
+      };
+      await sendSignInLinkToEmail(auth, emailLinkAddress, actionCodeSettings);
+      localStorage.setItem(EMAIL_LINK_STORAGE_KEY, emailLinkAddress);
+      setEmailLinkSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't send sign-in email.");
     } finally {
       setBusy(false);
     }
@@ -287,6 +352,39 @@ function SignIn() {
           <button disabled={busy} className="ghost-btn">
             Enter as Stream Controller
           </button>
+        </form>
+      )}
+
+      <button
+        type="button"
+        className="text-sm"
+        style={{ display: "block", margin: "12px auto 0", opacity: 0.6, background: "none", border: "none", cursor: "pointer" }}
+        onClick={() => setShowEmailLink((v) => !v)}
+      >
+        Have an email invite?
+      </button>
+
+      {showEmailLink && (
+        <form onSubmit={emailLinkSignIn} className="passcode-form">
+          {emailLinkSent ? (
+            <p className="text-sm" style={{ textAlign: "center" }}>
+              Check <strong>{emailLinkAddress}</strong> for a sign-in link.
+            </p>
+          ) : (
+            <>
+              <input
+                className="app-input"
+                placeholder="you@example.org"
+                type="email"
+                value={emailLinkAddress}
+                onChange={(e) => setEmailLinkAddress(e.target.value)}
+                required
+              />
+              <button disabled={busy} className="ghost-btn">
+                Email me a sign-in link
+              </button>
+            </>
+          )}
         </form>
       )}
 

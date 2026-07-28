@@ -58,13 +58,14 @@ Admin-only, on top of the above:
 
 ## Auth model
 
-Two ways to get **Mass Controller** access (start/stop, mic mute — the
-volunteer-level capability); a separate, higher-trust path for **Admin**.
+Three ways to sign in; which role you land with depends on the path, not
+the button you clicked.
 
-- **Google Sign-In (Firebase Auth)** — for Jason and any admins. Role
-  (`admin`) stored as a Firebase custom claim / Firestore user doc. Full
-  capabilities: curate broadcast title/visibility, mic/level controls,
-  generate and rotate the passcode below, view the activity log.
+- **Google Sign-In (Firebase Auth)** — for Jason and any admins with a
+  Google account. Role (`admin`) stored as a Firebase custom claim, granted
+  one-time via `scripts/setup/set-admin-claim.mjs` after their first
+  sign-in. Full capabilities: curate broadcast title/visibility, mic/level
+  controls, generate and rotate the passcode below, view the activity log.
 - **Shared passcode → "Mass Controller"** — for volunteers who just need
   start/stop, no Google account required. Admin generates/rotates a
   passcode from the admin screen. A volunteer enters the passcode plus
@@ -75,6 +76,25 @@ volunteer-level capability); a separate, higher-trust path for **Admin**.
   gate command writes on that claim, same as the admin path. The
   self-entered name feeds the activity log ("Started by: Jane, via
   passcode").
+- **Email-link sign-in** — for people who need their own dedicated,
+  non-rotating login but don't have (or don't want to create) a Google
+  account tied to their real email — e.g. the pastor, whose parish email is
+  Microsoft 365/Outlook, not Google Workspace. "Have an email invite?" on
+  the sign-in screen sends a Firebase-hosted magic link (free, no third
+  party, no SMS/email vendor needed) to whatever address is entered.
+  Clicking it only proves control of that inbox — it grants **no role by
+  itself**. The gate is `config/emailAccess`, a Firestore allowlist
+  (`{ [lowercased email]: { role, name } }`) managed out-of-band via
+  `scripts/setup/grant-email-access.mjs <email> <admin|controller> "<name>"`
+  — same spirit as `set-admin-claim.mjs`, but doesn't require a prior
+  sign-in first since the Admin SDK can look the email up directly.
+  `app/src/app/api/auth/email-link/claim/route.ts` does the actual check +
+  `setCustomUserClaims` after the client completes the link sign-in. Not
+  self-service — someone has to already be on the allowlist, so this can't
+  become an open signup form for arbitrary emails. Verified against the
+  Firebase Auth emulator end-to-end (including the not-on-the-allowlist
+  case) via `scripts/test-email-link-auth.mjs` — no real email sent during
+  that test; the emulator captures sign-in links instead of mailing them.
 
 This keeps the "easy button" promise for occasional volunteers (no account
 setup) while admins still get a real identity, a role split, and a usable

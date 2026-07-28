@@ -60,7 +60,14 @@ Three Google accounts are in play, doing different jobs — don't conflate them:
 2. Firestore: Build → Firestore Database → Create database → **Native
    mode** → pick a region (e.g. `us-central1` — same region as Cloud Run
    in Phase 6, to minimize latency).
-3. Auth: Build → Authentication → Sign-in method → enable **Google**.
+3. Auth: Build → Authentication → Sign-in method → enable **Google**, and
+   **Email/Password → Email link (passwordless sign-in)** for the
+   dedicated-login path (see design doc "Auth model" — used for the
+   pastor, whose email isn't Google). Under Authentication → Settings →
+   Authorized domains, make sure the production domain
+   (`wetube-mu.vercel.app`, or the custom domain if that's live) is listed
+   — Firebase only trusts `localhost` and `*.firebaseapp.com` by default,
+   and email-link sign-in will fail on any origin not in that list.
 4. Deploy the security rules from this repo (governs what the browser
    client can read — see `firestore.rules`):
    ```
@@ -183,6 +190,17 @@ than plain env vars — fine to defer for the POC.
 3. Sign out and back in on the app — you should now see the Admin panel.
 4. Click "Generate new Mass Controller passcode" and hand it out to
    volunteers.
+5. For anyone who needs a dedicated non-rotating login instead (e.g. the
+   pastor — see design doc "Auth model"), grant their email access first —
+   no prior sign-in needed for this one:
+   ```
+   FIREBASE_PROJECT_ID=wetube-livestream \
+     GOOGLE_APPLICATION_CREDENTIALS=wetube-agent-key.json \
+     node scripts/setup/grant-email-access.mjs their@email.com controller "Their Name"
+   ```
+   Test with your own alias first, not their real address — click "Have an
+   email invite?" on the sign-in screen, confirm the emailed link actually
+   signs you in with the right role, *then* grant the real person's email.
 
 ## Phase 8 — church PC agent (one-stop install, no Node.js needed)
 
