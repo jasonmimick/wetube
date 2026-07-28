@@ -119,3 +119,39 @@ so a future redesign doesn't have to rediscover them:
 - **`firebase-tools` prompts interactively on first run** (usage-collection
   opt-in) unless `CI=true` is set — the test scripts assume this; set it
   if running the emulator manually too.
+
+## Roadmap / not-yet-built ideas
+
+Discussed 2026-07-27, deliberately deferred — not started, just captured
+so the context isn't lost:
+
+- **Custom domain**: CNAME the Vercel app to
+  `holymotherandchildparish.org` once Jason has DNS access there. Blocked
+  on him getting DNS access, not a technical blocker.
+- **Scene/preset remote control ("Prayer Hour" mode)**: a low-key stream
+  mode — camera on a Marian statue/icon instead of the altar, with
+  royalty-free meditative music under it, started from the same remote.
+  Two real pieces of new scope, not a small tweak:
+  - **vMix side**: the agent already talks to vMix's local HTTP API for
+    start/stop; it would grow new commands to Cut/Fade to a specific
+    Input and Play an audio Input. PTZ camera preset recall (jumping the
+    existing PTZOPTICS camera to a saved "Mary" position) needs its exact
+    vMix API call confirmed against the camera model before relying on
+    it — didn't verify this, don't assume a specific function name.
+  - **Music licensing**: whatever track gets used has to be actually
+    licensed for public streaming (e.g. YouTube's Audio Library) — random
+    copyrighted audio on a live public stream risks a Content ID claim or
+    takedown on the channel.
+- **X32 digital mixer remote control** (mute a channel — e.g. "mute
+  guitar mic" — and adjust levels, from the wetube app): the X32 speaks
+  **OSC over UDP**, not HTTP — a different protocol from vMix's API.
+  Channel addresses look like `/ch/01/mix/on` (mute toggle),
+  `/ch/01/mix/fader` (level). Needs the X32 reachable on the same network
+  as the church PC agent (should be, same building) and a Node OSC
+  library. This was the "mic mute" troubleshooting control mentioned in
+  the original project brief at the top of this file — never built.
+- Both of the above would need: new agent command types beyond just
+  start/stop, a corresponding Firestore command schema, and new buttons
+  in the app. Nothing here has been scoped as an actual design doc yet —
+  do that (`docs/DESIGN-*.md`) before building, given it touches live
+  audio/video during real services.
