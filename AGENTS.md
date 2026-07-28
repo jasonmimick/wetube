@@ -166,6 +166,12 @@ so the context isn't lost:
   as the church PC agent (should be, same building) and a Node OSC
   library. This was the "mic mute" troubleshooting control mentioned in
   the original project brief at the top of this file — never built.
+- **Alerts** — Jason flagged wanting this next (2026-07-27), no scope
+  given yet beyond the word itself. Likely candidate given everything
+  else in this file: proactive email/SMS notification when the agent
+  heartbeat goes stale (church PC off/unreachable), so someone finds out
+  before Mass starts rather than after. Needs a vendor decision (email
+  or SMS provider) before building — don't assume one.
 - Any of the above would need: new agent command types beyond just
   start/stop, a corresponding Firestore command schema, and new buttons
   in the app. Nothing here has been scoped as an actual design doc yet —
