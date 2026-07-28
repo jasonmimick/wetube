@@ -134,14 +134,30 @@ so the context isn't lost:
   below, which is more interesting to Jason.)
 - **"Sunset with Mary" — automatic sunrise/sunset broadcast**: a stream
   that starts/stops itself automatically based on the *real* local
-  sunrise/sunset time for that day (not a fixed clock time), showing
-  Mary. Jason is thinking about this as a possible **separate side app**
-  that shares some code/blocks with wetube rather than a feature bolted
-  onto it — not scoped yet, just captured so it isn't lost. Whatever it
-  becomes, it needs the same two real pieces of new scope Prayer Hour
-  would have needed: vMix scene/Cut automation (agent currently only
-  does start/stop) and licensed meditative music (see X32/licensing
-  note below — same copyright concern applies here).
+  sunrise/sunset time for that day (not a fixed clock time). Jason is
+  thinking about this as a possible **separate side app** that shares
+  some code/blocks with wetube rather than a feature bolted onto it —
+  not scoped as a design doc yet, but the shape got clarified in
+  conversation on 2026-07-27, deliberately kept small:
+  - **Camera**: reuse the existing Mass framing as-is — no PTZ
+    automation, no camera preset recall. This was explicitly decided
+    after Jason tested PTZ preset switching by hand: zooming in and
+    "Save As"-ing a new `.vmix` profile did **not** restore the
+    original framing when reopening the Mass profile — PTZ pan/tilt/
+    zoom is a physical position of the camera motor, not something a
+    vMix project file stores and restores on open. Confirms the
+    earlier note that PTZ preset recall needs real verification before
+    relying on it for anything; for now, just don't move the camera.
+  - **Music**: build it in its own **separate `.vmix` profile**
+    dedicated to this feature, specifically so there's zero chance of
+    it ever bleeding into Mass's audio bus — Jason was (rightly)
+    nervous about adding a music Input to the shared Mass profile.
+  - **Timing**: same automation pattern as the 2-hour auto-shutoff — a
+    scheduled job (GitHub Actions, not Vercel Cron — see the Hobby-plan
+    cron-frequency gotcha below) computes the real local sunset time
+    (a small library like `suncalc`, from lat/long + date, no external
+    API needed) and triggers the existing start/stop broadcast logic
+    automatically.
 - **X32 digital mixer remote control** (mute a channel — e.g. "mute
   guitar mic" — and adjust levels, from the wetube app): the X32 speaks
   **OSC over UDP**, not HTTP — a different protocol from vMix's API.
@@ -158,3 +174,27 @@ so the context isn't lost:
   be actually licensed for public streaming (e.g. YouTube's Audio
   Library) — random copyrighted audio on a live public stream risks a
   Content ID claim or takedown on the channel.
+
+## More gotchas (post-launch)
+
+- **Vercel's Hobby (free) plan only allows cron jobs that run once a
+  day** — a `vercel.json` `crons` entry scheduled more often than that
+  doesn't just get throttled, it makes the **entire deployment fail**,
+  silently blocking every subsequent push until fixed (this happened for
+  real: the auto-shutoff feature's every-10-minutes cron broke every
+  deploy until removed). For anything that needs to run more often than
+  daily without upgrading the plan, trigger the same API route from a
+  **GitHub Actions scheduled workflow** instead (see
+  `.github/workflows/auto-shutoff.yml`) — free, no plan change, and it
+  can run as often as you want. Protect the route itself with a shared
+  secret (`CRON_SECRET`) checked as a bearer token, set as both a Vercel
+  env var and a GitHub Actions repo secret (`gh secret set`).
+- **macOS screenshot filenames use a narrow no-break space (U+202F)
+  before AM/PM**, not a regular space — e.g. `Screenshot ... 9.00.40
+  PM.png` looks like it has a normal space but doesn't. Any shell
+  command that types a literal space in the filename (`cp`, `mv`, `rm`,
+  even with proper quoting) fails with "No such file or directory" even
+  though `ls` displays it identically. Diagnose with
+  `python3 -c "import os; print([repr(f) for f in os.listdir('.')])"` to
+  see the real bytes, then use Python's `os.rename`/`os.remove` (or just
+  drag-and-drop in Finder) instead of shell commands for these files.
