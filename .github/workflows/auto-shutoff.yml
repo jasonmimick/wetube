@@ -1,0 +1,19 @@
+name: Auto-shutoff check
+
+# Vercel's free (Hobby) plan only allows cron jobs that run once a day,
+# which is useless for a 2-hour failsafe — so this runs on GitHub Actions'
+# own scheduler instead (free, no plan change) and just calls the same
+# API route Vercel Cron would have.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call auto-shutoff endpoint
+        run: |
+          curl -sf -X GET "https://wetube-mu.vercel.app/api/cron/auto-shutoff" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

@@ -128,20 +128,20 @@ so the context isn't lost:
 - **Custom domain**: CNAME the Vercel app to
   `holymotherandchildparish.org` once Jason has DNS access there. Blocked
   on him getting DNS access, not a technical blocker.
-- **Scene/preset remote control ("Prayer Hour" mode)**: a low-key stream
-  mode — camera on a Marian statue/icon instead of the altar, with
-  royalty-free meditative music under it, started from the same remote.
-  Two real pieces of new scope, not a small tweak:
-  - **vMix side**: the agent already talks to vMix's local HTTP API for
-    start/stop; it would grow new commands to Cut/Fade to a specific
-    Input and Play an audio Input. PTZ camera preset recall (jumping the
-    existing PTZOPTICS camera to a saved "Mary" position) needs its exact
-    vMix API call confirmed against the camera model before relying on
-    it — didn't verify this, don't assume a specific function name.
-  - **Music licensing**: whatever track gets used has to be actually
-    licensed for public streaming (e.g. YouTube's Audio Library) — random
-    copyrighted audio on a live public stream risks a Content ID claim or
-    takedown on the channel.
+- ~~Scene/preset remote control ("Prayer Hour" mode)~~ — **dropped**,
+  not pursuing this one. (Was: camera on a Marian statue + meditative
+  music, started from the remote. Superseded by the sunrise/sunset idea
+  below, which is more interesting to Jason.)
+- **"Sunset with Mary" — automatic sunrise/sunset broadcast**: a stream
+  that starts/stops itself automatically based on the *real* local
+  sunrise/sunset time for that day (not a fixed clock time), showing
+  Mary. Jason is thinking about this as a possible **separate side app**
+  that shares some code/blocks with wetube rather than a feature bolted
+  onto it — not scoped yet, just captured so it isn't lost. Whatever it
+  becomes, it needs the same two real pieces of new scope Prayer Hour
+  would have needed: vMix scene/Cut automation (agent currently only
+  does start/stop) and licensed meditative music (see X32/licensing
+  note below — same copyright concern applies here).
 - **X32 digital mixer remote control** (mute a channel — e.g. "mute
   guitar mic" — and adjust levels, from the wetube app): the X32 speaks
   **OSC over UDP**, not HTTP — a different protocol from vMix's API.
@@ -150,8 +150,11 @@ so the context isn't lost:
   as the church PC agent (should be, same building) and a Node OSC
   library. This was the "mic mute" troubleshooting control mentioned in
   the original project brief at the top of this file — never built.
-- Both of the above would need: new agent command types beyond just
+- Any of the above would need: new agent command types beyond just
   start/stop, a corresponding Firestore command schema, and new buttons
   in the app. Nothing here has been scoped as an actual design doc yet —
   do that (`docs/DESIGN-*.md`) before building, given it touches live
-  audio/video during real services.
+  audio/video during real services. Music used for any of these needs to
+  be actually licensed for public streaming (e.g. YouTube's Audio
+  Library) — random copyrighted audio on a live public stream risks a
+  Content ID claim or takedown on the channel.
