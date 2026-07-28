@@ -332,7 +332,7 @@ function SignIn() {
   );
 }
 
-function RemoteControl({ idToken }: { idToken: string }) {
+function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean }) {
   const [title, setTitle] = useState(defaultTitle());
   const [visibility, setVisibility] = useState<"public" | "private">("private");
   const [busy, setBusy] = useState(false);
@@ -381,6 +381,28 @@ function RemoteControl({ idToken }: { idToken: string }) {
       if (!res.ok) throw new Error(data.error || "Failed to stop");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to stop");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disableAutoShutoff() {
+    if (!mass) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/mass/override", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ massId: mass.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to disable auto-shutoff");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to disable auto-shutoff");
     } finally {
       setBusy(false);
     }
@@ -483,6 +505,23 @@ function RemoteControl({ idToken }: { idToken: string }) {
               </a>
             </div>
           )}
+          <p className="sub" style={{ textAlign: "center", marginTop: 10, marginBottom: 0 }}>
+            {mass?.autoShutoffDisabled
+              ? "Auto-shutoff disabled for this broadcast"
+              : "Auto-stops after 2 hours unless disabled"}
+            {isAdmin && !mass?.autoShutoffDisabled && (
+              <>
+                {" · "}
+                <button
+                  onClick={disableAutoShutoff}
+                  disabled={busy}
+                  style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "var(--indigo)", textDecoration: "underline", cursor: "pointer" }}
+                >
+                  Disable
+                </button>
+              </>
+            )}
+          </p>
         </div>
       )}
 
@@ -634,7 +673,7 @@ export default function HomeClient() {
 
       <main className="app-main">
         <div className="stack">
-          {idToken && <RemoteControl idToken={idToken} />}
+          {idToken && <RemoteControl idToken={idToken} isAdmin={role === "admin"} />}
           {role === "admin" && <ActivityLog />}
         </div>
         <div className="stack">

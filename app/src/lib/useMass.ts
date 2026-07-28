@@ -15,6 +15,7 @@ export interface Mass {
   youtubeMocked?: boolean;
   lastError?: string;
   createdAt?: string;
+  autoShutoffDisabled?: boolean;
 }
 
 export function useMass(massId: string | null) {

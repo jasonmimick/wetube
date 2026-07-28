@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
 import { AuthError, requireRole } from "@/lib/authz";
-import { ACTIVITY_LOG, COMMANDS_DOC, MASSES } from "@/lib/paths";
+import { stopMass } from "@/lib/massActions";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,33 +11,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "massId is required" }, { status: 400 });
     }
 
-    const massRef = adminDb.collection(MASSES).doc(massId);
-    const snap = await massRef.get();
-    if (!snap.exists) {
-      return NextResponse.json({ error: "Unknown massId" }, { status: 404 });
+    const result = await stopMass(massId, { uid: caller.uid, name: caller.name, role: caller.role });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
     }
-
-    const now = new Date().toISOString();
-    await massRef.update({ status: "stopping", updatedAt: now });
-
-    await adminDb.doc(COMMANDS_DOC).set({
-      type: "stop",
-      massId,
-      issuedAt: now,
-      issuedBy: caller.name,
-    });
-
-    const mass = snap.data();
-    await adminDb.collection(ACTIVITY_LOG).add({
-      action: "stop",
-      massId,
-      title: mass?.title,
-      watchUrl: mass?.watchUrl,
-      byUid: caller.uid,
-      byName: caller.name,
-      byRole: caller.role,
-      at: now,
-    });
 
     return NextResponse.json({ ok: true });
   } catch (err) {
