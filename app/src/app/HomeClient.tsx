@@ -361,7 +361,7 @@ function SignIn() {
         style={{ display: "block", margin: "12px auto 0", opacity: 0.6, background: "none", border: "none", cursor: "pointer" }}
         onClick={() => setShowEmailLink((v) => !v)}
       >
-        Have an email invite?
+        Sign in by email instead
       </button>
 
       {showEmailLink && (
