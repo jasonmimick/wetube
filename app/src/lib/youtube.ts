@@ -88,3 +88,41 @@ export async function createBoundBroadcast({
     mocked: false,
   };
 }
+
+export interface BroadcastStats {
+  concurrentViewers: number | null;
+  totalViews: number | null;
+}
+
+/**
+ * concurrentViewers only exists while a broadcast is actually live; it
+ * disappears from the API response once the stream ends (totalViews
+ * — the lifetime view count — takes over from there). Both come back
+ * null if the broadcast has neither yet (e.g. still starting).
+ */
+export async function getBroadcastStats(videoId: string): Promise<BroadcastStats> {
+  if (!hasRealCredentials()) {
+    return { concurrentViewers: null, totalViews: null };
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_OAUTH_CLIENT_ID,
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET
+  );
+  oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_OAUTH_REFRESH_TOKEN });
+
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+  const res = await youtube.videos.list({
+    part: ["liveStreamingDetails", "statistics"],
+    id: [videoId],
+  });
+
+  const video = res.data.items?.[0];
+  const concurrent = video?.liveStreamingDetails?.concurrentViewers;
+  const views = video?.statistics?.viewCount;
+
+  return {
+    concurrentViewers: concurrent != null ? Number(concurrent) : null,
+    totalViews: views != null ? Number(views) : null,
+  };
+}

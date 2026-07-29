@@ -346,7 +346,6 @@ function SignIn() {
             placeholder="Passcode"
             value={passcode}
             onChange={(e) => setPasscode(e.target.value)}
-            inputMode="numeric"
             required
           />
           <button disabled={busy} className="ghost-btn">
@@ -430,6 +429,45 @@ function SignIn() {
   );
 }
 
+interface BroadcastStats {
+  concurrentViewers: number | null;
+  totalViews: number | null;
+}
+
+// Polls rather than listening live — viewer counts come from the YouTube
+// Data API (via our own backend, to keep the OAuth refresh token
+// server-side), not Firestore, so there's no realtime listener option.
+function useBroadcastStats(massId: string | null, idToken: string) {
+  const [stats, setStats] = useState<BroadcastStats>({ concurrentViewers: null, totalViews: null });
+
+  useEffect(() => {
+    if (!massId) {
+      setStats({ concurrentViewers: null, totalViews: null });
+      return;
+    }
+    let cancelled = false;
+    async function poll() {
+      try {
+        const res = await fetch(`/api/mass/${massId}/stats`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (!res.ok || cancelled) return;
+        setStats(await res.json());
+      } catch {
+        // transient network hiccup — next poll retries
+      }
+    }
+    poll();
+    const id = setInterval(poll, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [massId, idToken]);
+
+  return stats;
+}
+
 function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean }) {
   const [title, setTitle] = useState(defaultTitle());
   const [visibility, setVisibility] = useState<"public" | "private">("private");
@@ -440,6 +478,7 @@ function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean
   const now = useNow();
   const agentOk = loading || online;
   const isLive = !!mass;
+  const stats = useBroadcastStats(isLive ? mass!.id : null, idToken);
 
   async function start() {
     setBusy(true);
@@ -597,7 +636,12 @@ function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean
           )}
           {mass?.watchUrl && (
             <div className="live-strip">
-              <span>Watching on YouTube</span>
+              <span>
+                Watching on YouTube
+                {stats.concurrentViewers != null && (
+                  <strong style={{ marginLeft: 6 }}>· {stats.concurrentViewers} watching now</strong>
+                )}
+              </span>
               <a href={mass.watchUrl} target="_blank" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                 Open stream <ExternalLinkIcon />
               </a>
@@ -704,18 +748,27 @@ function ActivityLog() {
 }
 
 function AdminPanel({ idToken }: { idToken: string }) {
-  const [passcode, setPasscode] = useState<string | null>(null);
+  const [passcode, setPasscode] = useState("");
+  const [saved, setSaved] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function generate() {
+  async function setPasscodeOnServer(e: React.FormEvent) {
+    e.preventDefault();
     setBusy(true);
+    setError(null);
     try {
       const res = await fetch("/api/admin/passcode", {
         method: "POST",
-        headers: { Authorization: `Bearer ${idToken}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ passcode }),
       });
       const data = await res.json();
-      setPasscode(data.passcode);
+      if (!res.ok) throw new Error(data.error || "Failed to set passcode");
+      setSaved(passcode);
+      setPasscode("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to set passcode");
     } finally {
       setBusy(false);
     }
@@ -724,16 +777,25 @@ function AdminPanel({ idToken }: { idToken: string }) {
   return (
     <div className="card">
       <h2>Admin</h2>
-      <p className="sub">Rotate the shared Stream Controller passcode</p>
-      <button onClick={generate} disabled={busy} className="ghost-btn" style={{ width: "100%" }}>
-        Generate new passcode
-      </button>
-      {passcode && (
+      <p className="sub">Set the shared Stream Controller passcode</p>
+      <form onSubmit={setPasscodeOnServer} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          className="app-input"
+          placeholder="New passcode or passphrase"
+          value={passcode}
+          onChange={(e) => setPasscode(e.target.value)}
+          style={{ flex: 1, minWidth: 160 }}
+          required
+        />
+        <button disabled={busy} className="ghost-btn">Set</button>
+      </form>
+      {saved && (
         <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span className="code-pill">{passcode}</span>
-          <span className="sub" style={{ margin: 0 }}>Share this once — it won&apos;t be shown again.</span>
+          <span className="code-pill">{saved}</span>
+          <span className="sub" style={{ margin: 0 }}>Now live — share it with volunteers.</span>
         </div>
       )}
+      {error && <p className="text-sm" style={{ color: "var(--danger)", marginTop: 10 }}>{error}</p>}
     </div>
   );
 }
@@ -772,7 +834,7 @@ export default function HomeClient() {
       <main className="app-main">
         <div className="stack">
           {idToken && <RemoteControl idToken={idToken} isAdmin={role === "admin"} />}
-          {role === "admin" && <ActivityLog />}
+          <ActivityLog />
         </div>
         <div className="stack">
           {role === "admin" && <HeartbeatMonitor />}

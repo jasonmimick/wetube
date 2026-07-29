@@ -21,7 +21,7 @@ service cloud.firestore {
     }
 
     match /activityLog/{entryId} {
-      allow read: if role() == 'admin';
+      allow read: if role() in ['admin', 'controller'];
       allow write: if false;
     }
 

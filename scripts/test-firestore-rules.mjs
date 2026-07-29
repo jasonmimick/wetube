@@ -52,7 +52,7 @@ async function main() {
     await check("admin can read masses", getDoc(doc(admin, "masses", "seed-mass")), "allow");
     await check("controller can read agent status", getDoc(doc(controller, "agent", "status")), "allow");
 
-    await check("controller cannot read activityLog", getDoc(doc(controller, "activityLog", "seed-entry")), "deny");
+    await check("controller can read activityLog", getDoc(doc(controller, "activityLog", "seed-entry")), "allow");
     await check("admin can read activityLog", getDoc(doc(admin, "activityLog", "seed-entry")), "allow");
 
     await check("nobody (incl. admin) can read the passcode doc from the client", getDoc(doc(admin, "config", "passcode")), "deny");
