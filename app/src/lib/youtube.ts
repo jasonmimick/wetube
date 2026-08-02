@@ -126,3 +126,36 @@ export async function getBroadcastStats(videoId: string): Promise<BroadcastStats
     totalViews: views != null ? Number(views) : null,
   };
 }
+
+/**
+ * Same as getBroadcastStats but for a whole page of past broadcasts at
+ * once — one YouTube API call instead of one per row. videos.list accepts
+ * up to 50 ids per call; callers with larger pages should chunk.
+ */
+export async function getBroadcastStatsBatch(videoIds: string[]): Promise<Record<string, BroadcastStats>> {
+  if (!hasRealCredentials() || videoIds.length === 0) return {};
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_OAUTH_CLIENT_ID,
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET
+  );
+  oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_OAUTH_REFRESH_TOKEN });
+
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+  const res = await youtube.videos.list({
+    part: ["liveStreamingDetails", "statistics"],
+    id: videoIds,
+  });
+
+  const out: Record<string, BroadcastStats> = {};
+  for (const video of res.data.items ?? []) {
+    if (!video.id) continue;
+    const concurrent = video.liveStreamingDetails?.concurrentViewers;
+    const views = video.statistics?.viewCount;
+    out[video.id] = {
+      concurrentViewers: concurrent != null ? Number(concurrent) : null,
+      totalViews: views != null ? Number(views) : null,
+    };
+  }
+  return out;
+}

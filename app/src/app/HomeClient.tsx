@@ -713,6 +713,10 @@ function HeartbeatMonitor() {
   );
 }
 
+// Kept for future reuse (fine-grained start/stop/override audit trail) —
+// no longer rendered directly; see BroadcastHistory below, which condenses
+// this same activityLog data down to one row per mass instead of one row
+// per action, so it doesn't grow unbounded as usage adds up.
 function ActivityLog() {
   const entries = useActivityLog();
   const now = useNow(30000);
@@ -743,6 +747,144 @@ function ActivityLog() {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+interface HistoryItem {
+  id: string;
+  title: string;
+  watchUrl?: string;
+  youtubeMocked: boolean;
+  createdByName: string;
+  createdAt: string;
+  endedAt: string;
+  totalViews: number | null;
+}
+
+interface HistoryPage {
+  items: HistoryItem[];
+  nextCursor: string | null;
+}
+
+function formatHistoryDate(iso?: string) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatDuration(startIso?: string, endIso?: string) {
+  if (!startIso || !endIso) return "";
+  const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
+  if (ms <= 0) return "";
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+// One row per past mass (start+stop condensed into one line), paginated —
+// stays readable even after hundreds of broadcasts, unlike a flat
+// per-action log. View counts come from a batched YouTube API call
+// server-side (/api/mass/history), not fetched per row.
+function BroadcastHistory({ idToken }: { idToken: string }) {
+  const [items, setItems] = useState<HistoryItem[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadPage(after: string | null): Promise<HistoryPage> {
+    const url = after ? `/api/mass/history?cursor=${encodeURIComponent(after)}` : "/api/mass/history";
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load history");
+    return data as HistoryPage;
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    loadPage(null)
+      .then((data) => {
+        if (cancelled) return;
+        setItems(data.items);
+        setCursor(data.nextCursor);
+        setHasMore(Boolean(data.nextCursor));
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load history");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [idToken]);
+
+  async function loadMore() {
+    if (!cursor) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const data = await loadPage(cursor);
+      setItems((prev) => [...prev, ...data.items]);
+      setCursor(data.nextCursor);
+      setHasMore(Boolean(data.nextCursor));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load history");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Broadcast History</h2>
+      <p className="sub">Past Masses, with final YouTube view counts</p>
+      {loading ? (
+        <p className="sub" style={{ marginBottom: 0 }}>Loading…</p>
+      ) : items.length === 0 ? (
+        <p className="sub" style={{ marginBottom: 0 }}>Nothing yet.</p>
+      ) : (
+        <>
+          <ul className="log">
+            {items.map((m) => (
+              <li key={m.id}>
+                <span>
+                  {m.watchUrl && !m.youtubeMocked ? (
+                    <a className="title" href={m.watchUrl} target="_blank" rel="noreferrer">{m.title}</a>
+                  ) : (
+                    <span>{m.title}</span>
+                  )}
+                  <span className="who-name">
+                    {" "}
+                    · {formatHistoryDate(m.createdAt)}
+                    {formatDuration(m.createdAt, m.endedAt) && ` · ${formatDuration(m.createdAt, m.endedAt)}`}
+                    {" "}· started by {m.createdByName}
+                  </span>
+                </span>
+                <time className="tabular">
+                  {m.youtubeMocked ? "mock" : m.totalViews != null ? `${m.totalViews} views` : "—"}
+                </time>
+              </li>
+            ))}
+          </ul>
+          {hasMore && (
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="ghost-btn"
+              style={{ width: "100%", marginTop: 10 }}
+            >
+              {loadingMore ? "Loading…" : "Load more"}
+            </button>
+          )}
+        </>
+      )}
+      {error && <p className="text-sm" style={{ color: "var(--danger)", marginTop: 10 }}>{error}</p>}
     </div>
   );
 }
@@ -834,7 +976,7 @@ export default function HomeClient() {
       <main className="app-main">
         <div className="stack">
           {idToken && <RemoteControl idToken={idToken} isAdmin={role === "admin"} />}
-          <ActivityLog />
+          {idToken && <BroadcastHistory idToken={idToken} />}
         </div>
         <div className="stack">
           {role === "admin" && <HeartbeatMonitor />}
