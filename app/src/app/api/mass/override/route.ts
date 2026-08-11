@@ -1,40 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
 import { AuthError, requireRole } from "@/lib/authz";
-import { ACTIVITY_LOG, MASSES } from "@/lib/paths";
+import { addActivity, getMass, updateMass } from "@/lib/store";
 
 /**
- * Disables the 2-hour auto-shutoff failsafe for one broadcast — admin
+ * Disables the 2-hour auto-shutoff failsafe for one broadcast — owner
  * only, so a volunteer can't accidentally leave the camera running
- * indefinitely without anyone noticing. See docs/AGENTS.md "Roadmap" —
- * this exists specifically to prevent "turn on and forget."
+ * indefinitely without anyone noticing.
  */
 export async function POST(req: NextRequest) {
   try {
-    const caller = await requireRole(req, ["admin"]);
+    const caller = await requireRole(req, ["owner"]);
     const { massId } = (await req.json()) as { massId: string };
 
     if (!massId) {
       return NextResponse.json({ error: "massId is required" }, { status: 400 });
     }
 
-    const massRef = adminDb.collection(MASSES).doc(massId);
-    const snap = await massRef.get();
-    if (!snap.exists) {
+    const mass = await getMass(massId);
+    if (!mass) {
       return NextResponse.json({ error: "Unknown massId" }, { status: 404 });
     }
 
-    const now = new Date().toISOString();
-    await massRef.update({ autoShutoffDisabled: true, updatedAt: now });
-
-    await adminDb.collection(ACTIVITY_LOG).add({
+    await updateMass(massId, { autoShutoffDisabled: true });
+    await addActivity({
       action: "override-shutoff",
       massId,
-      title: snap.data()?.title,
+      title: mass.title,
       byUid: caller.uid,
       byName: caller.name,
       byRole: caller.role,
-      at: now,
     });
 
     return NextResponse.json({ ok: true });

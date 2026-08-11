@@ -1,116 +1,144 @@
 // Runs on the church PC (or, during dev/testing, wherever you point it).
-// Polls Firestore for start/stop commands and drives the configured
-// streamer (mock / obs / vmix — see streamers/index.js), reporting a
-// heartbeat + status back so the web app knows if this process is alive.
-// Also serves a local-only status/control page (webserver.js) for whoever
-// is physically at the machine — started first, before Firestore setup, so
-// a bad/missing config is *visible* on the dashboard instead of just
-// crashing the process with no explanation.
+// Polls the wetube web app over plain HTTP for start/stop commands and
+// drives the configured streamer (mock / obs / vmix — see streamers/index.js),
+// reporting a heartbeat + status back so the web app knows if this process
+// is alive. Also serves a local-only status/control page (webserver.js) for
+// whoever is physically at the machine — started first, before anything
+// else, so a bad/missing config is *visible* on the dashboard instead of
+// just crashing the process with no explanation.
 //
-// See docs/DESIGN-stream-control.md "Reliability & fallback" for why this
-// polls rather than holding a persistent connection.
+// No database driver and no cloud credentials live here any more. Before
+// 2026-08-10 this process spoke to Firestore directly via firebase-admin,
+// which meant a real GCP service-account key sat on a machine volunteers
+// can physically access. Now it holds one shared secret and talks only to
+// our own API. See docs/DESIGN-drop-firebase.md.
 
 require("dotenv").config();
 
-const { cert, initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
 const streamer = require("./streamers");
 const state = require("./state");
 const webserver = require("./webserver");
 const { openBrowser } = require("./openBrowser");
 
+const APP_URL = (process.env.WETUBE_APP_URL || "").replace(/\/$/, "");
+const SHARED_SECRET = process.env.AGENT_SHARED_SECRET || "";
+
+// How often we ask for commands. Kept fast so pressing "Go Live" feels
+// instant. This is NOT how often the database is written — the server
+// throttles the heartbeat write to ~30s. Coupling those two rates is what
+// exhausted the old Firestore quota and took the system down.
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 3000);
+
+// Fail fast rather than hanging. The old Firestore client retried
+// internally for 600s, so one bad call wedged this loop for 10 minutes
+// while the dashboard showed a stale heartbeat instead of the real error.
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 15000);
+const MAX_BACKOFF_MS = Number(process.env.MAX_BACKOFF_MS || 60000);
+
 const WEB_PORT = Number(process.env.AGENT_WEB_PORT || 5757);
-const MASSES = "masses";
-const COMMANDS_DOC = "commands/latest";
-const AGENT_STATUS_DOC = "agent/status";
 
-function buildFirestoreApp() {
-  const projectId = process.env.FIREBASE_PROJECT_ID || "demo-wetube";
-
-  if (process.env.FIRESTORE_EMULATOR_HOST) {
-    return initializeApp({ projectId });
-  }
-
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-    return initializeApp({ credential: cert(serviceAccount), projectId });
-  }
-
-  const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (!keyFile) {
-    throw new Error(
-      "No Firestore credentials configured. Create a .env file next to this " +
-        "program with FIREBASE_PROJECT_ID and GOOGLE_APPLICATION_CREDENTIALS " +
-        "(see docs/MANUAL_SETUP.md Phase 8)."
-    );
-  }
-  // firebase-admin picks up GOOGLE_APPLICATION_CREDENTIALS itself, but check
-  // the file actually exists so the error is clear instead of a deep stack trace.
-  const fs = require("fs");
-  if (!fs.existsSync(keyFile)) {
-    throw new Error(`GOOGLE_APPLICATION_CREDENTIALS points to a file that doesn't exist: ${keyFile}`);
-  }
-  return initializeApp({ projectId });
-}
-
-let db = null;
-let lastProcessedIssuedAt = null;
 let running = true;
 
-async function heartbeat(extra) {
-  const vmixConnected = await streamer.checkConnected().catch(() => false);
-  const patch = {
-    lastHeartbeatAt: new Date().toISOString(),
-    vmixConnected,
-    ...extra,
-  };
-  state.update(patch);
-  await db.doc(AGENT_STATUS_DOC).set(patch, { merge: true });
+function checkConfig() {
+  if (!APP_URL) {
+    throw new Error(
+      "WETUBE_APP_URL is not set. Create a .env file next to this program with " +
+        "WETUBE_APP_URL and AGENT_SHARED_SECRET (see docs/MANUAL_SETUP.md)."
+    );
+  }
+  if (!SHARED_SECRET) {
+    throw new Error(
+      "AGENT_SHARED_SECRET is not set. It must match the value configured in Vercel."
+    );
+  }
+}
+
+async function api(path, body) {
+  const res = await fetch(`${APP_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SHARED_SECRET}`,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${path} -> HTTP ${res.status} ${text.slice(0, 200)}`);
+  }
+  return res.json();
 }
 
 async function processCommand(command) {
-  const massRef = db.collection(MASSES).doc(command.massId);
-  const now = new Date().toISOString();
-
+  const label = `${command.type} (${command.massId})`;
   try {
     if (command.type === "start") {
       await streamer.start();
-      await massRef.set({ status: "live", updatedAt: now }, { merge: true });
-      await heartbeat({ streaming: true, lastError: null, lastCommand: `start (${command.massId})` });
-      console.log(`[agent] started mass ${command.massId}`);
     } else if (command.type === "stop") {
       await streamer.stop();
-      await massRef.set({ status: "ended", updatedAt: now }, { merge: true });
-      await heartbeat({ streaming: false, lastError: null, lastCommand: `stop (${command.massId})` });
-      console.log(`[agent] stopped mass ${command.massId}`);
     } else {
       console.warn(`[agent] unknown command type: ${command.type}`);
+      // Still report it so the command is consumed and doesn't replay forever.
+      await api("/api/agent/result", {
+        commandId: command.id,
+        massId: command.massId,
+        type: command.type,
+        ok: false,
+        error: `unknown command type: ${command.type}`,
+      });
+      return;
     }
+
+    state.update({
+      streaming: command.type === "start",
+      lastCommand: label,
+      lastError: null,
+    });
+
+    await api("/api/agent/result", {
+      commandId: command.id,
+      massId: command.massId,
+      type: command.type,
+      ok: true,
+    });
+
+    console.log(`[agent] ${command.type === "start" ? "started" : "stopped"} mass ${command.massId}`);
   } catch (err) {
     console.error(`[agent] command ${command.type} failed:`, err.message);
-    await massRef.set({ status: "error", lastError: err.message, updatedAt: now }, { merge: true });
-    await heartbeat({ lastError: err.message });
-  }
+    state.update({ lastError: err.message, lastCommand: `${label} — failed` });
 
-  await db.doc(COMMANDS_DOC).set({ consumedAt: now }, { merge: true });
+    await api("/api/agent/result", {
+      commandId: command.id,
+      massId: command.massId,
+      type: command.type,
+      ok: false,
+      error: err.message,
+    }).catch((reportErr) => {
+      // If we can't even report the failure, the command stays unconsumed
+      // and will be retried on a later poll — which is the right outcome.
+      console.error("[agent] couldn't report failure:", reportErr.message);
+    });
+  }
 }
 
 async function tick() {
-  await heartbeat({});
+  const vmixConnected = await streamer.checkConnected().catch(() => false);
+  const snapshot = state.snapshot();
 
-  const snap = await db.doc(COMMANDS_DOC).get();
-  if (snap.exists) {
-    const command = snap.data();
-    const alreadyConsumed = command.consumedAt && command.consumedAt >= command.issuedAt;
-    const alreadyProcessedThisRun =
-      lastProcessedIssuedAt && command.issuedAt <= lastProcessedIssuedAt;
+  // One request does both jobs the old code needed two Firestore round-trips
+  // for: record the heartbeat, and fetch any pending command.
+  const { command } = await api("/api/agent/poll", {
+    vmixConnected,
+    streaming: snapshot.streaming,
+    lastCommand: snapshot.lastCommand,
+    lastError: snapshot.lastError,
+  });
 
-    if (command.issuedAt && !alreadyConsumed && !alreadyProcessedThisRun) {
-      lastProcessedIssuedAt = command.issuedAt;
-      await processCommand(command);
-    }
-  }
+  state.update({ lastHeartbeatAt: new Date().toISOString(), vmixConnected });
+
+  if (command) await processCommand(command);
 }
 
 async function main() {
@@ -124,14 +152,16 @@ async function main() {
   }
 
   try {
-    db = getFirestore(buildFirestoreApp());
+    checkConfig();
   } catch (err) {
     console.error("[agent] FAILED TO START:", err.message);
     state.update({ lastError: err.message, vmixConnected: false });
     console.error("[agent] the dashboard is still up so you can see this error:");
     console.error(`[agent]   http://127.0.0.1:${WEB_PORT}`);
-    return; // keep the process (and dashboard) alive; nothing to poll without a db
+    return; // keep the process (and dashboard) alive; nothing to poll
   }
+
+  console.log(`[agent] talking to ${APP_URL}`);
 
   for (const sig of ["SIGINT", "SIGTERM"]) {
     process.on(sig, () => {
@@ -140,14 +170,24 @@ async function main() {
     });
   }
 
+  // Back off on repeated failures instead of hammering a backend that's
+  // already refusing us.
+  let consecutiveFailures = 0;
+
   while (running) {
     try {
       await tick();
+      consecutiveFailures = 0;
     } catch (err) {
-      console.error("[agent] tick failed:", err);
+      consecutiveFailures += 1;
+      console.error(`[agent] tick failed (attempt ${consecutiveFailures}):`, err.message);
       state.update({ lastError: err.message });
     }
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+    const delay = consecutiveFailures
+      ? Math.min(POLL_INTERVAL_MS * 2 ** consecutiveFailures, MAX_BACKOFF_MS)
+      : POLL_INTERVAL_MS;
+    await new Promise((r) => setTimeout(r, delay));
   }
 }
 

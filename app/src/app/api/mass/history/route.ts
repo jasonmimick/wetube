@@ -1,53 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
 import { AuthError, requireRole } from "@/lib/authz";
-import { MASSES } from "@/lib/paths";
+import { listEndedMasses } from "@/lib/store";
 import { getBroadcastStatsBatch } from "@/lib/youtube";
 
 const PAGE_SIZE = 15;
 
 // Read-only, paginated: one row per ended mass (not per start/stop action
-// the way activityLog is), with a batched YouTube view-count lookup so a
-// page of history costs one API call, not one per row. Doesn't touch the
-// start/stop write path at all.
+// the way the activity log is), with a batched YouTube view-count lookup so
+// a page of history costs one API call, not one per row.
 export async function GET(req: NextRequest) {
   try {
-    await requireRole(req, ["admin", "controller"]);
+    await requireRole(req, ["owner", "controller"]);
 
     const cursor = req.nextUrl.searchParams.get("cursor");
-    let q = adminDb
-      .collection(MASSES)
-      .where("status", "==", "ended")
-      .orderBy("createdAt", "desc")
-      .limit(PAGE_SIZE + 1);
-    if (cursor) q = q.startAfter(cursor);
+    const { items: masses, hasMore } = await listEndedMasses(cursor, PAGE_SIZE);
 
-    const snap = await q.get();
-    const docs = snap.docs.slice(0, PAGE_SIZE);
-    const hasMore = snap.docs.length > PAGE_SIZE;
-
-    const videoIds = docs
-      .map((d) => d.data())
+    const videoIds = masses
       .filter((m) => m.youtubeVideoId && !m.youtubeMocked)
       .map((m) => m.youtubeVideoId as string);
     const statsById = await getBroadcastStatsBatch(videoIds);
 
-    const items = docs.map((d) => {
-      const m = d.data();
-      const stats = m.youtubeVideoId ? statsById[m.youtubeVideoId] : undefined;
-      return {
-        id: d.id,
-        title: m.title,
-        visibility: m.visibility,
-        watchUrl: m.watchUrl,
-        youtubeMocked: m.youtubeMocked ?? false,
-        createdByName: m.createdByName,
-        createdAt: m.createdAt,
-        endedAt: m.updatedAt,
-        autoShutoffDisabled: m.autoShutoffDisabled ?? false,
-        totalViews: stats?.totalViews ?? null,
-      };
-    });
+    const items = masses.map((m) => ({
+      id: m.id,
+      title: m.title,
+      visibility: m.visibility,
+      watchUrl: m.watchUrl,
+      youtubeMocked: m.youtubeMocked,
+      createdByName: m.createdByName,
+      createdAt: m.createdAt,
+      endedAt: m.updatedAt,
+      autoShutoffDisabled: m.autoShutoffDisabled,
+      totalViews: (m.youtubeVideoId ? statsById[m.youtubeVideoId]?.totalViews : null) ?? null,
+    }));
 
     return NextResponse.json({
       items,

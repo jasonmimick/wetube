@@ -1,29 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
 import { AuthError, requireRole } from "@/lib/authz";
-import { AGENT_STATUS_DOC, MASSES } from "@/lib/paths";
+import { getAgentStatus, getMass } from "@/lib/store";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ massId: string }> }
 ) {
   try {
-    await requireRole(req, ["admin", "controller"]);
+    await requireRole(req, ["owner", "controller"]);
     const { massId } = await params;
 
-    const [massSnap, agentSnap] = await Promise.all([
-      adminDb.collection(MASSES).doc(massId).get(),
-      adminDb.doc(AGENT_STATUS_DOC).get(),
-    ]);
+    const [mass, agent] = await Promise.all([getMass(massId), getAgentStatus()]);
 
-    if (!massSnap.exists) {
+    if (!mass) {
       return NextResponse.json({ error: "Unknown massId" }, { status: 404 });
     }
 
-    return NextResponse.json({
-      mass: { id: massSnap.id, ...massSnap.data() },
-      agent: agentSnap.exists ? agentSnap.data() : null,
-    });
+    return NextResponse.json({ mass, agent });
   } catch (err) {
     if (err instanceof AuthError) {
       return NextResponse.json({ error: err.message }, { status: err.status });

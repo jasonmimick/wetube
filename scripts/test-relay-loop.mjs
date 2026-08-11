@@ -1,143 +1,162 @@
-// Exercises the real relay path end-to-end against the Firestore emulator:
-//   this script (standing in for the Next.js API routes) writes
-//   masses/{id} + commands/latest
-//     -> agent/agent.js polls Firestore, calls the vmix.js HTTP adapter
-//     -> mock-vmix-server.js (standing in for a real vMix instance)
-//     -> agent writes status + heartbeat back to Firestore
-// Runs several start/stop loops, plus one forced-unreachable failure case,
-// per docs/DESIGN-stream-control.md's reliability plan.
+// End-to-end test of the church-PC agent:
+//
+//   mock wetube API  ->  agent  ->  mock vMix
+//        (commands)            (StartStreaming/StopStreaming)
+//        <- heartbeat + result <-
+//
+// Replaces the old Firestore-emulator version. The agent no longer touches
+// a database, so this needs no emulator and no JRE — it stands up a tiny
+// HTTP server that speaks the same contract as /api/agent/poll and
+// /api/agent/result, which makes the test both faster and a much closer
+// match to what actually ships.
 
-import { initializeApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import http from "node:http";
 import { spawnLogged, sleep, waitFor, waitForPort } from "./lib.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, "..");
-const AGENT_DIR = path.join(ROOT, "agent");
+const API_PORT = 5999;
+const VMIX_PORT = 8088;
+const SECRET = "test-shared-secret";
 
-process.env.FIRESTORE_EMULATOR_HOST ||= "127.0.0.1:8090";
+// ------------------------------------------------ mock wetube API server
 
-const db = getFirestore(initializeApp({ projectId: "demo-wetube" }));
+const pending = []; // commands the agent hasn't picked up yet
+const results = []; // what the agent reported back
+let heartbeats = 0;
+let lastHeartbeat = null;
+let nextCommandId = 1;
 
-async function createMass(title) {
-  const ref = db.collection("masses").doc();
-  const now = new Date().toISOString();
-  await ref.set({ title, visibility: "public", status: "starting", createdAt: now, updatedAt: now });
-  return ref;
+function queueCommand(type, massId) {
+  const command = { id: nextCommandId++, type, massId, issuedAt: new Date().toISOString(), issuedBy: "test" };
+  pending.push(command);
+  return command;
 }
 
-async function issueCommand(type, massId) {
-  await db.doc("commands/latest").set({
-    type,
-    massId,
-    issuedAt: new Date().toISOString(),
-    issuedBy: "test-harness",
+function readJson(req) {
+  return new Promise((resolve) => {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(body || "{}"));
+      } catch {
+        resolve({});
+      }
+    });
   });
 }
 
-async function massStatus(ref) {
-  return (await ref.get()).data()?.status;
-}
-
-async function agentStatus() {
-  return (await db.doc("agent/status").get()).data() || {};
-}
-
-async function main() {
-  const failures = [];
-  const children = [];
-
-  function cleanup() {
-    for (const child of children) child.kill();
+const api = http.createServer(async (req, res) => {
+  if (req.headers.authorization !== `Bearer ${SECRET}`) {
+    res.writeHead(401).end(JSON.stringify({ error: "Unauthorized" }));
+    return;
   }
 
-  try {
-    console.log("--- starting mock vMix server ---");
-    const mockVmix = spawnLogged("mock-vmix", "node", ["mock-vmix-server.js"], {
-      cwd: AGENT_DIR,
-      env: { ...process.env, MOCK_VMIX_PORT: "8088" },
-    });
-    children.push(mockVmix);
-    await waitForPort(8088);
+  const body = await readJson(req);
 
-    console.log("--- starting agent ---");
-    const agent = spawnLogged("agent", "node", ["agent.js"], {
-      cwd: AGENT_DIR,
-      env: {
-        ...process.env,
-        STREAMER: "vmix",
-        VMIX_BASE_URL: "http://127.0.0.1:8088",
-        FIREBASE_PROJECT_ID: "demo-wetube",
-        POLL_INTERVAL_MS: "500",
-      },
-    });
-    children.push(agent);
-
-    await waitFor(async () => (await agentStatus()).lastHeartbeatAt, {
-      timeoutMs: 15000,
-      label: "agent's first heartbeat",
-    });
-    console.log("--- agent is up and reporting heartbeats ---");
-
-    // --- Loop N: normal start/stop cycles ---
-    const LOOPS = 3;
-    for (let i = 1; i <= LOOPS; i++) {
-      const massRef = await createMass(`Test Mass #${i}`);
-      await issueCommand("start", massRef.id);
-      await waitFor(async () => (await massStatus(massRef)) === "live", {
-        timeoutMs: 8000,
-        label: `loop ${i}: mass goes live`,
-      });
-      if (!(await agentStatus()).streaming) {
-        failures.push(`loop ${i}: agent/status.streaming was not true after start`);
-      }
-
-      await issueCommand("stop", massRef.id);
-      await waitFor(async () => (await massStatus(massRef)) === "ended", {
-        timeoutMs: 8000,
-        label: `loop ${i}: mass ends`,
-      });
-      if ((await agentStatus()).streaming) {
-        failures.push(`loop ${i}: agent/status.streaming was still true after stop`);
-      }
-      console.log(`--- loop ${i}/${LOOPS} passed (start -> live -> stop -> ended) ---`);
-    }
-
-    // --- Failure path: vMix unreachable ---
-    console.log("--- killing mock vMix server to test the unreachable/error path ---");
-    mockVmix.kill();
-    await sleep(1000); // let a heartbeat tick observe the outage
-
-    if ((await agentStatus()).vmixConnected !== false) {
-      failures.push("expected agent/status.vmixConnected to go false once vMix was killed");
-    }
-
-    const errorMassRef = await createMass("Test Mass — should error");
-    await issueCommand("start", errorMassRef.id);
-    await waitFor(async () => (await massStatus(errorMassRef)) === "error", {
-      timeoutMs: 8000,
-      label: "mass status becomes 'error' when vMix is unreachable",
-    });
-    const massData = (await errorMassRef.get()).data();
-    if (!massData.lastError) {
-      failures.push("expected masses/{id}.lastError to be set on failure");
-    }
-    console.log("--- unreachable-vMix error path passed ---");
-  } catch (err) {
-    failures.push(err.message);
-  } finally {
-    cleanup();
+  if (req.url === "/api/agent/poll") {
+    heartbeats += 1;
+    lastHeartbeat = body;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ command: pending[0] ?? null }));
+    return;
   }
 
-  if (failures.length) {
-    console.error("\nFAILURES:");
-    failures.forEach((f) => console.error(" - " + f));
-    process.exitCode = 1;
+  if (req.url === "/api/agent/result") {
+    results.push(body);
+    // Consume it, the way consumeCommand() does server-side.
+    const idx = pending.findIndex((c) => c.id === body.commandId);
+    if (idx >= 0) pending.splice(idx, 1);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  res.writeHead(404).end();
+});
+
+// ------------------------------------------------------------------ run
+
+let agent;
+let mockVmix;
+let failed = false;
+
+function check(label, condition) {
+  if (condition) {
+    console.log(`--- ${label} ---`);
   } else {
-    console.log("\nAll relay-loop tests passed.");
+    console.error(`!!! FAILED: ${label}`);
+    failed = true;
   }
 }
 
-main();
+try {
+  await new Promise((resolve) => api.listen(API_PORT, "127.0.0.1", resolve));
+  console.log(`[mock-api] listening on http://127.0.0.1:${API_PORT}`);
+
+  mockVmix = spawnLogged("mock-vmix", "node", ["agent/mock-vmix-server.js"]);
+  await waitForPort(VMIX_PORT);
+
+  agent = spawnLogged("agent", "node", ["agent.js"], {
+    cwd: "agent",
+    env: {
+      ...process.env,
+      STREAMER: "vmix",
+      VMIX_BASE_URL: `http://127.0.0.1:${VMIX_PORT}`,
+      WETUBE_APP_URL: `http://127.0.0.1:${API_PORT}`,
+      AGENT_SHARED_SECRET: SECRET,
+      POLL_INTERVAL_MS: "300",
+      AGENT_WEB_PORT: "5757",
+      AGENT_NO_AUTO_OPEN: "1",
+    },
+  });
+
+  await waitFor(() => heartbeats > 0, { timeoutMs: 15000, label: "agent's first heartbeat" });
+  check("agent is up and sending heartbeats", true);
+
+  // The heartbeat payload is what drives the app's green LED.
+  check(
+    "heartbeat reports vMix connected",
+    lastHeartbeat?.vmixConnected === true
+  );
+
+  for (let i = 1; i <= 3; i++) {
+    const startCmd = queueCommand("start", `mass-${i}`);
+    await waitFor(() => results.some((r) => r.commandId === startCmd.id && r.ok), {
+      timeoutMs: 8000,
+      label: `start command ${i} acknowledged`,
+    });
+
+    const stopCmd = queueCommand("stop", `mass-${i}`);
+    await waitFor(() => results.some((r) => r.commandId === stopCmd.id && r.ok), {
+      timeoutMs: 8000,
+      label: `stop command ${i} acknowledged`,
+    });
+
+    check(`loop ${i}/3 passed (start -> ok -> stop -> ok)`, true);
+  }
+
+  // Unreachable vMix: the agent must report the failure rather than
+  // silently dropping the command or wedging.
+  console.log("--- killing mock vMix to test the unreachable/error path ---");
+  mockVmix.kill();
+  await sleep(500);
+
+  const failCmd = queueCommand("start", "mass-error");
+  await waitFor(
+    () => results.some((r) => r.commandId === failCmd.id && r.ok === false && r.error),
+    { timeoutMs: 10000, label: "failed start reported with an error" }
+  );
+  check("unreachable-vMix error path reports failure upstream", true);
+
+  if (failed) throw new Error("one or more assertions failed");
+  console.log("All relay-loop tests passed.");
+} catch (err) {
+  console.error("Relay-loop test FAILED:", err.message);
+  failed = true;
+} finally {
+  agent?.kill();
+  mockVmix?.kill();
+  api.close();
+}
+
+process.exit(failed ? 1 : 0);

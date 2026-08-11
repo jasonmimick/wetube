@@ -1,41 +1,51 @@
 "use client";
 
-import { onIdTokenChanged, type User } from "firebase/auth";
-import { useEffect, useState } from "react";
-import { auth } from "@/lib/firebaseClient";
+import { useCallback, useEffect, useState } from "react";
 
-export type Role = "admin" | "controller" | null;
+export type Role = "owner" | "controller" | null;
 
 export interface AuthedUser {
   status: "loading" | "signed-out" | "signed-in";
-  user: User | null;
   role: Role;
   name: string | null;
 }
 
-export function useAuthedUser(): AuthedUser {
+/**
+ * Replaces Firebase's onIdTokenChanged. The session cookie is httpOnly so
+ * the browser can't inspect it directly — it asks /api/auth/session instead.
+ *
+ * There's no token to thread through components any more: the cookie rides
+ * along on every same-origin fetch automatically, so API calls just work.
+ */
+export function useAuthedUser() {
   const [state, setState] = useState<AuthedUser>({
     status: "loading",
-    user: null,
     role: null,
     name: null,
   });
 
-  useEffect(() => {
-    return onIdTokenChanged(auth, async (user) => {
-      if (!user) {
-        setState({ status: "signed-out", user: null, role: null, name: null });
-        return;
-      }
-      const result = await user.getIdTokenResult();
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/session");
+      const data = await res.json();
       setState({
-        status: "signed-in",
-        user,
-        role: (result.claims.role as Role) ?? null,
-        name: (result.claims.name as string) ?? user.displayName ?? user.email ?? "Unknown",
+        status: data.status === "signed-in" ? "signed-in" : "signed-out",
+        role: data.role ?? null,
+        name: data.name ?? null,
       });
-    });
+    } catch {
+      setState({ status: "signed-out", role: null, name: null });
+    }
   }, []);
 
-  return state;
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const signOut = useCallback(async () => {
+    await fetch("/api/auth/session", { method: "DELETE" });
+    setState({ status: "signed-out", role: null, name: null });
+  }, []);
+
+  return { ...state, refresh, signOut };
 }

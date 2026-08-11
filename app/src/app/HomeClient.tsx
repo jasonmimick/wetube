@@ -1,21 +1,14 @@
 "use client";
 
-import {
-  GoogleAuthProvider,
-  isSignInWithEmailLink,
-  sendSignInLinkToEmail,
-  signInWithCustomToken,
-  signInWithEmailLink,
-  signInWithPopup,
-  signOut,
-} from "firebase/auth";
 import Image from "next/image";
 import { useEffect, useState } from "react";
-import { auth } from "@/lib/firebaseClient";
-import { useActivityLog } from "@/lib/useActivityLog";
-import { useAgentStatus } from "@/lib/useAgentStatus";
 import { useAuthedUser } from "@/lib/useAuthedUser";
-import { useActiveMass } from "@/lib/useMass";
+import {
+  useAppState,
+  type ActivityEntry,
+  type AgentStatus,
+  type Mass,
+} from "@/lib/useAppState";
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
@@ -26,7 +19,7 @@ function useNow(intervalMs = 1000) {
   return now;
 }
 
-function relativeTime(iso: string | undefined, now: number) {
+function relativeTime(iso: string | null | undefined, now: number) {
   if (!iso) return "never";
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   if (s < 5) return "just now";
@@ -35,7 +28,7 @@ function relativeTime(iso: string | undefined, now: number) {
   return `${Math.round(s / 3600)}h ago`;
 }
 
-function clockTime(iso: string | undefined) {
+function clockTime(iso: string | null | undefined) {
   if (!iso) return null;
   return new Date(iso).toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -44,7 +37,7 @@ function clockTime(iso: string | undefined) {
   });
 }
 
-function elapsed(iso: string | undefined, now: number) {
+function elapsed(iso: string | null | undefined, now: number) {
   if (!iso) return "00:00";
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   const h = Math.floor(s / 3600);
@@ -114,9 +107,17 @@ function ThemeToggle() {
   );
 }
 
-function TopBar({ idToken, name, role }: { idToken: string | null; name: string | null; role: string | null }) {
-  const { online, loading } = useAgentStatus();
-  const agentOk = loading || online;
+function TopBar({
+  name,
+  role,
+  agentOk,
+  onSignOut,
+}: {
+  name: string | null;
+  role: string | null;
+  agentOk: boolean;
+  onSignOut: () => void;
+}) {
   const initials = (name || "?")
     .split(/\s+/)
     .map((p) => p[0])
@@ -136,8 +137,8 @@ function TopBar({ idToken, name, role }: { idToken: string | null; name: string 
         ) : (
           <span className="chip off"><span className="dot" />Agent offline</span>
         )}
-        {idToken && (
-          <button className="who" onClick={() => signOut(auth)} title="Sign out" aria-label={`Signed in as ${name}. Click to sign out.`}>
+        {name && (
+          <button className="who" onClick={onSignOut} title="Sign out" aria-label={`Signed in as ${name}. Click to sign out.`}>
             <span className="avatar">{initials}</span>
             <span className="who-text">
               <strong>{name}</strong>
@@ -209,69 +210,23 @@ function StepDevice({
   );
 }
 
-const EMAIL_LINK_STORAGE_KEY = "wetube_emailForSignIn";
-
-function SignIn() {
+/**
+ * The only sign-in path now. Google popup and email-link sign-in were both
+ * dropped along with Firebase Auth — one shared passcode for volunteers, a
+ * separate owner passcode for Jason, and which one you type decides your
+ * role. The server sets an httpOnly session cookie, so there's no token for
+ * this component to hold onto.
+ */
+function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   const [name, setName] = useState("");
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showPasscode, setShowPasscode] = useState(false);
-  const [showEmailLink, setShowEmailLink] = useState(false);
-  const [emailLinkAddress, setEmailLinkAddress] = useState("");
-  const [emailLinkSent, setEmailLinkSent] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("theme");
     document.documentElement.setAttribute("data-theme", stored === "light" ? "light" : "dark");
   }, []);
-
-  // Completes an in-progress email-link sign-in when the user lands back
-  // here after clicking the link Firebase emailed them.
-  useEffect(() => {
-    if (!isSignInWithEmailLink(auth, window.location.href)) return;
-
-    let email = localStorage.getItem(EMAIL_LINK_STORAGE_KEY);
-    if (!email) {
-      email = window.prompt("Confirm the email you signed in with:");
-    }
-    if (!email) return;
-
-    (async () => {
-      setBusy(true);
-      setError(null);
-      try {
-        const cred = await signInWithEmailLink(auth, email!, window.location.href);
-        localStorage.removeItem(EMAIL_LINK_STORAGE_KEY);
-        window.history.replaceState(null, "", window.location.pathname);
-
-        const idToken = await cred.user.getIdToken();
-        const res = await fetch("/api/auth/email-link/claim", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${idToken}` },
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          await signOut(auth);
-          throw new Error(data.error || "This email isn't authorized for sign-in.");
-        }
-        await cred.user.getIdToken(true); // pick up the new role claim
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Email-link sign-in failed.");
-      } finally {
-        setBusy(false);
-      }
-    })();
-  }, []);
-
-  async function googleSignIn() {
-    setError(null);
-    try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
-    } catch {
-      setError("Google sign-in failed.");
-    }
-  }
 
   async function passcodeSignIn(e: React.FormEvent) {
     e.preventDefault();
@@ -285,28 +240,9 @@ function SignIn() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Invalid passcode");
-      await signInWithCustomToken(auth, data.token);
+      onSignedIn();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function emailLinkSignIn(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      const actionCodeSettings = {
-        url: window.location.href,
-        handleCodeInApp: true,
-      };
-      await sendSignInLinkToEmail(auth, emailLinkAddress, actionCodeSettings);
-      localStorage.setItem(EMAIL_LINK_STORAGE_KEY, emailLinkAddress);
-      setEmailLinkSent(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't send sign-in email.");
     } finally {
       setBusy(false);
     }
@@ -323,69 +259,26 @@ function SignIn() {
         <p className="sub">Start and stop the Mass livestream right from your phone.</p>
       </header>
 
-      <div className="cta-row">
-        <button className="primary" onClick={googleSignIn}>
-          Sign in with Google
+      <form onSubmit={passcodeSignIn} className="passcode-form">
+        <input
+          className="app-input"
+          placeholder="Your name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
+        <input
+          className="app-input"
+          placeholder="Passcode"
+          type="password"
+          value={passcode}
+          onChange={(e) => setPasscode(e.target.value)}
+          required
+        />
+        <button disabled={busy} className="primary">
+          {busy ? "Checking…" : "Enter"}
         </button>
-        <button className="secondary" onClick={() => setShowPasscode((v) => !v)}>
-          Enter with passcode
-        </button>
-      </div>
-
-      {showPasscode && (
-        <form onSubmit={passcodeSignIn} className="passcode-form">
-          <input
-            className="app-input"
-            placeholder="Your name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <input
-            className="app-input"
-            placeholder="Passcode"
-            value={passcode}
-            onChange={(e) => setPasscode(e.target.value)}
-            required
-          />
-          <button disabled={busy} className="ghost-btn">
-            Enter as Stream Controller
-          </button>
-        </form>
-      )}
-
-      <button
-        type="button"
-        className="text-sm"
-        style={{ display: "block", margin: "12px auto 0", opacity: 0.6, background: "none", border: "none", cursor: "pointer" }}
-        onClick={() => setShowEmailLink((v) => !v)}
-      >
-        Sign in by email instead
-      </button>
-
-      {showEmailLink && (
-        <form onSubmit={emailLinkSignIn} className="passcode-form">
-          {emailLinkSent ? (
-            <p className="text-sm" style={{ textAlign: "center" }}>
-              Check <strong>{emailLinkAddress}</strong> for a sign-in link.
-            </p>
-          ) : (
-            <>
-              <input
-                className="app-input"
-                placeholder="you@example.org"
-                type="email"
-                value={emailLinkAddress}
-                onChange={(e) => setEmailLinkAddress(e.target.value)}
-                required
-              />
-              <button disabled={busy} className="ghost-btn">
-                Email me a sign-in link
-              </button>
-            </>
-          )}
-        </form>
-      )}
+      </form>
 
       {error && <p className="text-sm" style={{ color: "var(--danger)", textAlign: "center", marginTop: 10 }}>{error}</p>}
 
@@ -437,7 +330,7 @@ interface BroadcastStats {
 // Polls rather than listening live — viewer counts come from the YouTube
 // Data API (via our own backend, to keep the OAuth refresh token
 // server-side), not Firestore, so there's no realtime listener option.
-function useBroadcastStats(massId: string | null, idToken: string) {
+function useBroadcastStats(massId: string | null) {
   const [stats, setStats] = useState<BroadcastStats>({ concurrentViewers: null, totalViews: null });
 
   useEffect(() => {
@@ -448,9 +341,9 @@ function useBroadcastStats(massId: string | null, idToken: string) {
     let cancelled = false;
     async function poll() {
       try {
-        const res = await fetch(`/api/mass/${massId}/stats`, {
-          headers: { Authorization: `Bearer ${idToken}` },
-        });
+        // Session cookie rides along automatically on same-origin fetches —
+        // no Authorization header to thread through any more.
+        const res = await fetch(`/api/mass/${massId}/stats`);
         if (!res.ok || cancelled) return;
         setStats(await res.json());
       } catch {
@@ -463,22 +356,31 @@ function useBroadcastStats(massId: string | null, idToken: string) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [massId, idToken]);
+  }, [massId]);
 
   return stats;
 }
 
-function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean }) {
+function RemoteControl({
+  isOwner,
+  mass,
+  agentStatus,
+  agentOk,
+  refresh,
+}: {
+  isOwner: boolean;
+  mass: Mass | null;
+  agentStatus: AgentStatus | null;
+  agentOk: boolean;
+  refresh: () => void;
+}) {
   const [title, setTitle] = useState(defaultTitle());
   const [visibility, setVisibility] = useState<"public" | "private">("private");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { mass } = useActiveMass();
-  const { status: agentStatus, online, loading } = useAgentStatus();
   const now = useNow();
-  const agentOk = loading || online;
   const isLive = !!mass;
-  const stats = useBroadcastStats(isLive ? mass!.id : null, idToken);
+  const stats = useBroadcastStats(isLive ? mass!.id : null);
 
   async function start() {
     setBusy(true);
@@ -486,14 +388,14 @@ function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean
     try {
       const res = await fetch("/api/mass/start", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, visibility }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to start");
+      // Poll-based state won't reflect this for up to 5s otherwise, and the
+      // button needs to feel immediate.
+      refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start");
     } finally {
@@ -508,14 +410,12 @@ function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean
     try {
       const res = await fetch("/api/mass/stop", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ massId: mass.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to stop");
+      refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to stop");
     } finally {
@@ -530,14 +430,12 @@ function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean
     try {
       const res = await fetch("/api/mass/override", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ massId: mass.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to disable auto-shutoff");
+      refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to disable auto-shutoff");
     } finally {
@@ -651,7 +549,7 @@ function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean
             {mass?.autoShutoffDisabled
               ? "Auto-shutoff disabled for this broadcast"
               : "Auto-stops after 2 hours unless disabled"}
-            {isAdmin && !mass?.autoShutoffDisabled && (
+            {isOwner && !mass?.autoShutoffDisabled && (
               <>
                 {" · "}
                 <button
@@ -672,8 +570,15 @@ function RemoteControl({ idToken, isAdmin }: { idToken: string; isAdmin: boolean
   );
 }
 
-function HeartbeatMonitor() {
-  const { status, online, loading } = useAgentStatus();
+function HeartbeatMonitor({
+  status,
+  online,
+  loading,
+}: {
+  status: AgentStatus | null;
+  online: boolean;
+  loading: boolean;
+}) {
   const now = useNow();
 
   return (
@@ -717,8 +622,7 @@ function HeartbeatMonitor() {
 // no longer rendered directly; see BroadcastHistory below, which condenses
 // this same activityLog data down to one row per mass instead of one row
 // per action, so it doesn't grow unbounded as usage adds up.
-function ActivityLog() {
-  const entries = useActivityLog();
+function ActivityLog({ entries }: { entries: ActivityEntry[] }) {
   const now = useNow(30000);
 
   return (
@@ -787,7 +691,7 @@ function formatDuration(startIso?: string, endIso?: string) {
 // stays readable even after hundreds of broadcasts, unlike a flat
 // per-action log. View counts come from a batched YouTube API call
 // server-side (/api/mass/history), not fetched per row.
-function BroadcastHistory({ idToken }: { idToken: string }) {
+function BroadcastHistory() {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -797,7 +701,7 @@ function BroadcastHistory({ idToken }: { idToken: string }) {
 
   async function loadPage(after: string | null): Promise<HistoryPage> {
     const url = after ? `/api/mass/history?cursor=${encodeURIComponent(after)}` : "/api/mass/history";
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+    const res = await fetch(url);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load history");
     return data as HistoryPage;
@@ -822,7 +726,8 @@ function BroadcastHistory({ idToken }: { idToken: string }) {
     return () => {
       cancelled = true;
     };
-  }, [idToken]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function loadMore() {
     if (!cursor) return;
@@ -889,7 +794,7 @@ function BroadcastHistory({ idToken }: { idToken: string }) {
   );
 }
 
-function AdminPanel({ idToken }: { idToken: string }) {
+function AdminPanel() {
   const [passcode, setPasscode] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -902,7 +807,7 @@ function AdminPanel({ idToken }: { idToken: string }) {
     try {
       const res = await fetch("/api/admin/passcode", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ passcode }),
       });
       const data = await res.json();
@@ -943,27 +848,30 @@ function AdminPanel({ idToken }: { idToken: string }) {
 }
 
 export default function HomeClient() {
-  const { status, role, name, user } = useAuthedUser();
-  const [idToken, setIdToken] = useState<string | null>(null);
+  const { status, role, name, refresh: refreshAuth, signOut } = useAuthedUser();
+
+  // One poller for the whole screen. The Firestore version had three
+  // components each opening their own listener; with polling that would be
+  // three independent request loops, so state is lifted here and passed down.
+  const { mass, agent, online, loading, refresh } = useAppState();
 
   if (status === "loading") return null;
-  if (status === "signed-out") return <SignIn />;
+  if (status === "signed-out") return <SignIn onSignedIn={refreshAuth} />;
 
-  if (!role) {
-    return (
-      <div className="mx-auto mt-16 max-w-sm space-y-4 text-center px-4">
-        <p>Signed in as {name}, but no role is assigned yet.</p>
-        <p className="sub">Ask an admin to grant access.</p>
-        <button onClick={() => signOut(auth)} className="ghost-btn">Sign out</button>
-      </div>
-    );
-  }
+  const isOwner = role === "owner";
 
-  user?.getIdToken().then(setIdToken);
+  // Treated as connected until the first poll lands, so the UI doesn't flash
+  // "Agent offline" on every page load.
+  const agentOk = loading || online;
 
   return (
     <div>
-      <TopBar idToken={idToken} name={name} role={role === "admin" ? "Admin" : "Stream Controller"} />
+      <TopBar
+        name={name}
+        role={isOwner ? "Owner" : "Stream Controller"}
+        agentOk={agentOk}
+        onSignOut={signOut}
+      />
 
       <div className="page-header">
         <div>
@@ -975,12 +883,18 @@ export default function HomeClient() {
 
       <main className="app-main">
         <div className="stack">
-          {idToken && <RemoteControl idToken={idToken} isAdmin={role === "admin"} />}
-          {idToken && <BroadcastHistory idToken={idToken} />}
+          <RemoteControl
+            isOwner={isOwner}
+            mass={mass}
+            agentStatus={agent}
+            agentOk={agentOk}
+            refresh={refresh}
+          />
+          <BroadcastHistory />
         </div>
         <div className="stack">
-          {role === "admin" && <HeartbeatMonitor />}
-          {role === "admin" && idToken && <AdminPanel idToken={idToken} />}
+          {isOwner && <HeartbeatMonitor status={agent} online={online} loading={loading} />}
+          {isOwner && <AdminPanel />}
         </div>
       </main>
     </div>

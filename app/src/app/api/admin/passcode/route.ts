@@ -1,21 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
 import { AuthError, requireRole } from "@/lib/authz";
-import { PASSCODE_DOC } from "@/lib/paths";
+import { CONFIG_CONTROLLER_PASSCODE, setConfig } from "@/lib/store";
 import { hashPasscode } from "@/lib/passcode";
 
+/**
+ * Owner rotates the shared volunteer passcode. Deliberately cannot change
+ * the owner passcode — that's a setup-script job (scripts/setup/set-passcode.mjs),
+ * so a stolen owner session can't lock Jason out of his own system.
+ */
 export async function POST(req: NextRequest) {
   try {
-    const caller = await requireRole(req, ["admin"]);
+    const caller = await requireRole(req, ["owner"]);
 
-    const { passcode } = await req.json();
-    if (!passcode || typeof passcode !== "string" || !passcode.trim()) {
+    const { passcode } = (await req.json()) as { passcode?: string };
+    if (!passcode?.trim()) {
       return NextResponse.json({ error: "passcode is required" }, { status: 400 });
     }
 
-    await adminDb.doc(PASSCODE_DOC).set({
+    await setConfig(CONFIG_CONTROLLER_PASSCODE, {
       hash: hashPasscode(passcode.trim()),
-      updatedAt: new Date().toISOString(),
       updatedBy: caller.name,
     });
 
@@ -24,6 +27,7 @@ export async function POST(req: NextRequest) {
     if (err instanceof AuthError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    throw err;
+    console.error("[admin/passcode] failed", err);
+    return NextResponse.json({ error: "Failed to set passcode" }, { status: 500 });
   }
 }

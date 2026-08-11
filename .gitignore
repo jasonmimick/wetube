@@ -4,21 +4,24 @@ agent/node_modules
 scripts/node_modules
 
 # env / secrets
+# NOTE: the negation must come LAST — gitignore is last-match-wins, so a
+# broad `.env*` placed after `!.env.example` silently re-ignores the
+# examples (which is what `vercel link` did when it appended its own rules).
 .env
 .env.*
+.env*
 !.env.example
+!**/.env.example
 **/service-account*.json
-**/firebase-adminsdk*.json
 **/*-key.json
-agent/wetube-agent-key.json
 
 # built agent executables (100MB+, built via `npm run build` in agent/)
 agent/dist/
 
+# tooling
+.vercel
+
 # misc
 .DS_Store
 *.log
-firestore-debug.log
-firebase-debug.log
 ui-debug.log
-.firebase/

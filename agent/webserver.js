@@ -45,6 +45,22 @@ function start({ state, streamer }) {
     res.writeHead(404).end();
   });
 
+  // Without this, a stale agent still holding the port makes the new process
+  // die on an unhandled 'error' event — which defeats the entire reason the
+  // dashboard starts first (so problems are *visible* rather than a console
+  // window that flashes and vanishes). Warn and carry on instead: polling
+  // still works, only the local status page is unavailable.
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(
+        `[agent] local status page unavailable — port ${PORT} is already in use ` +
+          `(another agent still running?). Continuing without it.`
+      );
+    } else {
+      console.error("[agent] local status page failed:", err.message);
+    }
+  });
+
   server.listen(PORT, "127.0.0.1", () => {
     console.log(`[agent] local status page: http://127.0.0.1:${PORT}`);
   });

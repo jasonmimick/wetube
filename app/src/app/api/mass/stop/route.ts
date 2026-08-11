@@ -4,7 +4,7 @@ import { stopMass } from "@/lib/massActions";
 
 export async function POST(req: NextRequest) {
   try {
-    const caller = await requireRole(req, ["admin", "controller"]);
+    const caller = await requireRole(req, ["owner", "controller"]);
     const { massId } = (await req.json()) as { massId: string };
 
     if (!massId) {
