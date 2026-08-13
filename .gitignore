@@ -15,6 +15,11 @@ scripts/node_modules
 **/service-account*.json
 **/*-key.json
 
+# Local passcode cheat sheet — plaintext credentials, written by
+# scripts/setup/set-passcode.mjs. THIS REPO IS PUBLIC; never commit this.
+.passcodes.local.md
+**/*.local.md
+
 # built agent executables (100MB+, built via `npm run build` in agent/)
 agent/dist/
 

@@ -24,8 +24,17 @@ import { randomBytes, scryptSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeCheatSheet } from "./cheatsheet.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+// Plaintext cheat sheet, written locally so Jason can look a passcode up
+// instead of resetting it. The database only stores a scrypt hash — it
+// cannot be reversed — so without this the only recovery is overwriting.
+//
+// Gitignored (this repo is PUBLIC) and chmod 600. Pass --no-cheatsheet to
+// skip writing it.
+const CHEATSHEET = join(repoRoot, ".passcodes.local.md");
 
 function loadEnvFallback() {
   if (process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN) return "environment";
@@ -88,12 +97,18 @@ function promptHidden(question) {
   });
 }
 
-const role = process.argv[2];
-let passcode = process.argv[3];
-const displayName = process.argv[4];
+const argv = process.argv.slice(2);
+const noCheatSheet = argv.includes("--no-cheatsheet");
+const positional = argv.filter((a) => !a.startsWith("--"));
+
+const role = positional[0];
+let passcode = positional[1];
+const displayName = positional[2];
 
 if (!role || !["owner", "controller"].includes(role)) {
-  console.error("Usage: node scripts/setup/set-passcode.mjs <owner|controller> [passcode] [displayName]");
+  console.error(
+    "Usage: node scripts/setup/set-passcode.mjs <owner|controller> [passcode] [displayName] [--no-cheatsheet]"
+  );
   process.exit(1);
 }
 
@@ -186,3 +201,10 @@ console.log(`✅ ${role} passcode set.`);
 console.log(`   config now contains: ${present.join(", ")}`);
 if (!present.includes("owner_passcode")) console.log("   ⚠ owner passcode still not set");
 if (!present.includes("controller_passcode")) console.log("   ⚠ controller passcode still not set");
+
+if (noCheatSheet) {
+  console.log("   (cheat sheet not updated — --no-cheatsheet)");
+} else {
+  const path = writeCheatSheet(CHEATSHEET, role, passcode);
+  console.log(`   cheat sheet updated: ${path} (chmod 600, gitignored)`);
+}
