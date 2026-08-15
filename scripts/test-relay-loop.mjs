@@ -24,6 +24,7 @@ const results = []; // what the agent reported back
 let heartbeats = 0;
 let lastHeartbeat = null;
 let nextCommandId = 1;
+let failPolls = 0; // when >0, /api/agent/poll returns 500 and decrements
 
 function queueCommand(type, massId) {
   const command = { id: nextCommandId++, type, massId, issuedAt: new Date().toISOString(), issuedBy: "test" };
@@ -54,6 +55,12 @@ const api = http.createServer(async (req, res) => {
   const body = await readJson(req);
 
   if (req.url === "/api/agent/poll") {
+    if (failPolls > 0) {
+      failPolls -= 1;
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "poll failed" }));
+      return;
+    }
     heartbeats += 1;
     lastHeartbeat = body;
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -134,6 +141,24 @@ try {
 
     check(`loop ${i}/3 passed (start -> ok -> stop -> ok)`, true);
   }
+
+  // A transient poll failure must not leave a permanent error on the
+  // dashboard. This shipped broken once: the agent recorded lastError and
+  // only cleared it when a command succeeded, so a single blip parked a
+  // stale message that read as current for days.
+  console.log("--- forcing one poll to fail (transient error recovery) ---");
+  failPolls = 1;
+  await waitFor(() => lastHeartbeat?.lastError, {
+    timeoutMs: 10000,
+    label: "agent reports the transient error",
+  });
+  check("transient failure is reported upstream", !!lastHeartbeat.lastError);
+
+  await waitFor(() => lastHeartbeat?.lastError == null, {
+    timeoutMs: 10000,
+    label: "agent clears the error after recovering",
+  });
+  check("error clears once polling recovers", lastHeartbeat.lastError == null);
 
   // Unreachable vMix: the agent must report the failure rather than
   // silently dropping the command or wedging.

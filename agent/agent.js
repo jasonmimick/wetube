@@ -136,7 +136,16 @@ async function tick() {
     lastError: snapshot.lastError,
   });
 
-  state.update({ lastHeartbeatAt: new Date().toISOString(), vmixConnected });
+  // A successful poll means we're healthy *now*, so clear any error left
+  // over from an earlier transient failure. Without this, one blip parks a
+  // stale message on the dashboard forever and it reads as current — which
+  // is worse than showing nothing, since the whole point of that panel is
+  // telling you whether something is wrong right now.
+  //
+  // Command failures aren't lost by this: they're recorded durably against
+  // the mass (status='error' + last_error) and on the command row itself,
+  // and lastCommand keeps its "— failed" suffix.
+  state.update({ lastHeartbeatAt: new Date().toISOString(), vmixConnected, lastError: null });
 
   if (command) await processCommand(command);
 }
