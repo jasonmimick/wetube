@@ -222,23 +222,39 @@ No Node.js install, no `npm install`, no terminal on the church PC. The
 exact same source also builds to a macOS binary (`npm run build:mac`),
 which is how this was verified locally before ever touching Windows: built,
 ran standalone from a clean directory with just a `.env` file next to it,
-confirmed real Firestore heartbeats and the manual start/stop endpoints
-both worked — the Windows build is the same code, just a different target.
+confirmed real heartbeats against the deployed app and the manual
+start/stop endpoints both worked — the Windows build is the same code, just
+a different target.
 
 1. On this Mac: `cd agent && npm run build:win` → produces
    `agent/dist/wetube-agent-win.exe`.
-2. Copy two files to the church PC (via Chrome Remote Desktop, a USB
+2. Copy one file to the church PC (via Chrome Remote Desktop, a USB
    drive, whatever's easiest) into a new folder, e.g. `C:\wetube-agent\`:
    - `wetube-agent-win.exe`
-   - `wetube-agent-key.json` (the service account key from Phase 3)
+
+   (Before the 2026-08-10 migration off Firebase this step also copied a
+   `wetube-agent-key.json` service-account key. There is no key file any
+   more — the agent holds one shared secret and talks only to our own API.
+   See `docs/DESIGN-drop-firebase.md`.)
 3. In that same folder, create a plain text file named `.env`:
    ```
+   WETUBE_APP_URL=https://wetube-mu.vercel.app
+   AGENT_SHARED_SECRET=<same value as AGENT_SHARED_SECRET in Vercel>
    STREAMER=vmix
    VMIX_BASE_URL=http://127.0.0.1:8088
-   FIREBASE_PROJECT_ID=wetube-livestream
-   GOOGLE_APPLICATION_CREDENTIALS=C:\wetube-agent\wetube-agent-key.json
-   POLL_INTERVAL_MS=3000
+   POLL_INTERVAL_MS=60000
    ```
+   `WETUBE_APP_URL` and `AGENT_SHARED_SECRET` are both required —
+   `checkConfig()` refuses to start without them (the local status page
+   still comes up, showing the error).
+
+   **`POLL_INTERVAL_MS` is a cost control, not a tuning knob.** It is how
+   often this process asks Vercel for work, around the clock, forever. At
+   the old 3000 it generated ~28.8k requests/day (~864k/month) to catch two
+   masses a week, which reached 75% of the Hobby Fluid Active CPU allowance
+   — the point at which Vercel pauses projects. 60000 costs ~43k/month. The
+   tradeoff is that pressing Go Live can take up to 60s to reach this PC.
+   Do not lower it without working out the monthly request count first.
 4. Double-click `wetube-agent-win.exe` to run it. A console window stays
    open (that's normal — it's the log). Open **http://127.0.0.1:5757** in
    a browser on that PC to see the local status/control page: vMix

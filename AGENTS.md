@@ -24,12 +24,13 @@ controls (mic mute).
 
 The Next.js app on Vercel is the only thing that touches the database
 (Turso/libSQL). The church-PC agent holds no credentials beyond one shared
-secret and never speaks SQL — it polls `POST /api/agent/poll` every ~3s,
-which returns any pending command and records its heartbeat in the same
-request, then reports the outcome to `POST /api/agent/result`. The browser
-polls `GET /api/state` every 5s for the active mass, agent status, and
-activity log. Auth is a signed httpOnly session cookie issued by
-`/api/auth/passcode`; there is no third-party auth vendor.
+secret and never speaks SQL — it polls `POST /api/agent/poll` every
+`POLL_INTERVAL_MS` (60s; the rate is a cost control, see Gotchas), which
+returns any pending command and records its heartbeat in the same request,
+then reports the outcome to `POST /api/agent/result`. The browser polls
+`GET /api/state` every 5s while its tab is visible for the active mass,
+agent status, and activity log. Auth is a signed httpOnly session cookie
+issued by `/api/auth/passcode`; there is no third-party auth vendor.
 
 ## Layout
 
@@ -154,17 +155,45 @@ so a future redesign doesn't have to rediscover them:
 
 ## Gotchas
 
-- **The heartbeat write rate is the thing that broke production once.**
-  On 2026-08-10 the agent wrote its status on every 3s poll — 28,800
-  writes/day against Firestore's 20,000/day free cap — and exhausted the
-  entire project's quota, failing *every* write in the system until
-  midnight Pacific. It reads like a church-PC or credentials problem and is
-  neither. The fix is structural: the agent still polls at 3s for
-  responsiveness, but the heartbeat DB write is throttled **server-side**
-  in `/api/agent/poll` (~30s, or immediately on a material change). The app
-  only marks the agent stale after 90s, so this drives the green LED just
-  as accurately at 1/10th the cost. `scripts/test-store.mjs` asserts the
-  throttle actually suppresses writes — keep that test passing.
+- **The agent's poll rate has taken production down twice, for two
+  different reasons.** Check every meter attached to the poll loop, not
+  just the one that broke last time.
+
+  *2026-08-10 — Firestore write quota.* The agent wrote its status on every
+  3s poll: 28,800 writes/day against a 20,000/day free cap, which exhausted
+  the whole project's quota and failed *every* write in the system until
+  midnight Pacific. Fixed by throttling the heartbeat write **server-side**
+  in `/api/agent/poll` (~30s, or immediately on a material change), which
+  decoupled write frequency from poll frequency.
+  `scripts/test-store.mjs` asserts the throttle suppresses writes — keep
+  that test passing.
+
+  *2026-09-10 — Vercel Fluid Active CPU.* The 2026-08-10 fix worked and is
+  still working, but it only addressed the *database* cost. The HTTP
+  request itself still fired every 3s, and each one is a function
+  invocation that pays full startup CPU whether or not anything happened.
+  That reached 75% of the Hobby Fluid Active CPU allowance (and 78% of Edge
+  Requests) — the threshold where Vercel pauses projects. wetube was 91% of
+  all Fluid usage across 14 projects in the account; nothing else was
+  close. Fixed by raising `POLL_INTERVAL_MS` to **60000** in the church
+  PC's `.env`: ~864k requests/month down to ~43k.
+
+  Current settings, which are load-bearing together:
+  - `POLL_INTERVAL_MS=60000` on the church PC (`agent.js:30`, read once at
+    startup — the process must be restarted to pick up a change)
+  - `STALE_AFTER_MS = 180_000` (`app/src/lib/useAppState.ts`) — sized for a
+    60s heartbeat plus two missed polls. Raising the poll interval without
+    raising this makes the dashboard report the agent offline while it is
+    healthy.
+  - The cost of a 60s poll is that Go Live can take up to 60s to reach the
+    church PC. That is the accepted tradeoff for 1–2 masses a week. Do not
+    lower `POLL_INTERVAL_MS` without working out the monthly request count.
+- **A polling `useEffect` with no visibility check is a background cost.**
+  `useAppState` polls `/api/state` every 5s while mounted. Left running
+  unconditionally, one control-panel tab open all day is 17.3k
+  requests/day — more than the church-PC agent. It now skips the poll when
+  `document.hidden` and refreshes on `visibilitychange`. Any new polling
+  hook needs the same treatment.
 - **A stray `app/app/` directory silently breaks Next.js route discovery.**
   If a shell command runs from inside `app/` while you think you're at the
   repo root, `mkdir -p app/src/...` creates a nested `app/app/src/...` —

@@ -80,10 +80,28 @@ export function useAppState() {
     }
   }, []);
 
+  // Only poll while the tab is actually visible. A control panel left open
+  // in a background tab was costing 17.3k requests/day on its own — more
+  // than the church-PC agent does at a 60s poll — for state nobody is
+  // looking at. Refreshing on visibilitychange means coming back to the tab
+  // is *faster* than the old behaviour, not slower: fresh state immediately
+  // instead of waiting out the rest of the 5s interval.
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, POLL_MS);
-    return () => clearInterval(id);
+
+    const id = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, POLL_MS);
+
+    const onVisibility = () => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [refresh]);
 
   const online =
