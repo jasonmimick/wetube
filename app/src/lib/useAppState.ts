@@ -35,9 +35,12 @@ export interface ActivityEntry {
 
 const POLL_MS = 5000;
 
-// Matches the agent's heartbeat write interval (30s) with room for two
-// missed writes before the LED goes red — see docs/DESIGN-drop-firebase.md.
-const STALE_AFTER_MS = 90_000;
+// The agent polls every POLL_INTERVAL_MS — 60s once it's out of the old
+// 3s default, which was generating ~28.8k Vercel requests/day to catch two
+// masses a week. The server still throttles the heartbeat write to 30s, so
+// at a 60s poll a write lands on every poll. 180s leaves room for two
+// missed polls before the LED goes red — see docs/DESIGN-drop-firebase.md.
+const STALE_AFTER_MS = 180_000;
 
 /**
  * Single polled endpoint replacing the four Firestore onSnapshot listeners
