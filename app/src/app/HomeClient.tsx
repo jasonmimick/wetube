@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useAuthedUser } from "@/lib/useAuthedUser";
 import {
   useAppState,
+  STALE_AFTER_MS,
   type ActivityEntry,
   type AgentStatus,
   type Mass,
@@ -467,7 +468,7 @@ function RemoteControl({
 
         <div className="leds">
           <div className="led"><span className={`bulb ${agentOk ? "on" : "off"}`} /><small>Agent</small></div>
-          <div className="led"><span className={`bulb ${agentStatus?.vmixConnected ? "on" : "off"}`} /><small>vMix</small></div>
+          <div className="led"><span className={`bulb ${agentOk && agentStatus?.vmixConnected ? "on" : "off"}`} /><small>vMix</small></div>
           <div className="led"><span className={`bulb ${mass?.status === "live" ? "warn" : "off"}`} /><small>On Air</small></div>
         </div>
 
@@ -588,13 +589,17 @@ function HeartbeatMonitor({
       <div className="heartbeat-grid">
         <div className="metric">
           <div className="k">vMix</div>
-          <div className={`v ${status?.vmixConnected ? "ok" : "bad"}`}>
-            {status?.vmixConnected === undefined ? "—" : status.vmixConnected ? "Connected" : "Disconnected"}
+          <div className={`v ${!online ? "" : status?.vmixConnected ? "ok" : "bad"}`}>
+            {!online || status?.vmixConnected == null
+              ? "—"
+              : status.vmixConnected
+                ? "Connected"
+                : "Disconnected"}
           </div>
         </div>
         <div className="metric">
           <div className="k">Streaming</div>
-          <div className="v">{status?.streaming ? "Yes" : "No"}</div>
+          <div className="v">{!online ? "—" : status?.streaming ? "Yes" : "No"}</div>
         </div>
         <div className="metric" style={{ gridColumn: "span 2" }}>
           <div className="k">Last heartbeat</div>
@@ -611,7 +616,9 @@ function HeartbeatMonitor({
       )}
       {!loading && !online && (
         <p className="sub" style={{ marginTop: 10, marginBottom: 0 }}>
-          No heartbeat in over 90s — the church PC agent may be off or unreachable.
+          No heartbeat in over {Math.round(STALE_AFTER_MS / 1000)}s — the church PC
+          agent may be off or unreachable. vMix and streaming state above are
+          reported by that agent, so they are unknown while it is unreachable.
         </p>
       )}
     </div>

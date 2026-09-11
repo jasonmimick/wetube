@@ -40,7 +40,7 @@ const POLL_MS = 5000;
 // masses a week. The server still throttles the heartbeat write to 30s, so
 // at a 60s poll a write lands on every poll. 180s leaves room for two
 // missed polls before the LED goes red — see docs/DESIGN-drop-firebase.md.
-const STALE_AFTER_MS = 180_000;
+export const STALE_AFTER_MS = 180_000;
 
 /**
  * Single polled endpoint replacing the four Firestore onSnapshot listeners

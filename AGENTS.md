@@ -188,6 +188,20 @@ so a future redesign doesn't have to rediscover them:
   - The cost of a 60s poll is that Go Live can take up to 60s to reach the
     church PC. That is the accepted tradeoff for 1–2 masses a week. Do not
     lower `POLL_INTERVAL_MS` without working out the monthly request count.
+- **Everything in `agent_status` is last-known, not live.** `vmix_connected`,
+  `streaming` and `last_error` are whatever the agent reported on its last
+  successful poll, and the row keeps that value indefinitely once the agent
+  stops reporting. Rendering those fields without gating on `online` shows
+  a reading from hours ago as current truth — the dashboard displayed
+  "vMix: Connected" with a green LED for 12 hours after the agent was shut
+  down (2026-09-11). Any new UI reading an agent-reported field must gate
+  it on `online` and fall back to "—", the way the Last-heartbeat metric
+  already did. `mass.status` is different: it is database state, not agent
+  state, and stays valid while the agent is down.
+- **UI copy that quotes a threshold must derive it, not restate it.**
+  The heartbeat panel hardcoded "No heartbeat in over 90s" and silently
+  went wrong the moment `STALE_AFTER_MS` moved to 180s. It now imports the
+  constant and formats it.
 - **A polling `useEffect` with no visibility check is a background cost.**
   `useAppState` polls `/api/state` every 5s while mounted. Left running
   unconditionally, one control-panel tab open all day is 17.3k
