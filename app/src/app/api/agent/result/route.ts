@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, requireAgent } from "@/lib/authz";
-import { consumeCommand, updateMass } from "@/lib/store";
+import { consumeCommand, getMass, updateMass } from "@/lib/store";
+import { completeBroadcast } from "@/lib/youtube";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,19 @@ export async function POST(req: NextRequest) {
         status: type === "start" ? "live" : "ended",
         lastError: null,
       });
+
+      // Tell YouTube the broadcast is over. enableAutoStop does not reliably
+      // fire against the church's reusable stream key — a mass stopped here
+      // stayed "Live" on YouTube for days. Deliberately after updateMass and
+      // non-fatal: wetube's own state is the source of truth for the UI, and
+      // a YouTube API hiccup must not leave the command unconsumed and
+      // replayable on the agent's next poll.
+      if (type === "stop") {
+        const mass = await getMass(massId);
+        if (mass?.youtubeVideoId) {
+          await completeBroadcast(mass.youtubeVideoId);
+        }
+      }
     } else {
       await updateMass(massId, { status: "error", lastError: error ?? "unknown error" });
     }

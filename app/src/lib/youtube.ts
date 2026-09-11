@@ -89,6 +89,47 @@ export async function createBoundBroadcast({
   };
 }
 
+/**
+ * Explicitly transitions a broadcast to "complete" so YouTube stops
+ * showing it as Live.
+ *
+ * Broadcasts are created with enableAutoStop, which is *supposed* to end
+ * them when the ingest stops. It does not reliably do so against a
+ * persistent/reusable stream key, which is what the church uses: the
+ * 2026-09-06 mass was still showing as Live on YouTube five days later,
+ * long after wetube's own DB had marked it ended. Nothing in the stop path
+ * ever told YouTube — the agent stopped vMix, and that was it.
+ *
+ * Safe to call more than once: a broadcast that is already complete (or was
+ * never live) returns an error from the transition endpoint, which is not
+ * worth failing the stop over, so it is logged and swallowed.
+ */
+export async function completeBroadcast(broadcastId: string): Promise<void> {
+  if (!hasRealCredentials() || broadcastId.startsWith("mock-")) return;
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_OAUTH_CLIENT_ID,
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET
+  );
+  oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_OAUTH_REFRESH_TOKEN });
+
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+
+  try {
+    await youtube.liveBroadcasts.transition({
+      id: broadcastId,
+      broadcastStatus: "complete",
+      part: ["id", "status"],
+    });
+    console.log(`[youtube] broadcast ${broadcastId} transitioned to complete`);
+  } catch (err) {
+    console.warn(
+      `[youtube] could not complete broadcast ${broadcastId} (it may already be complete):`,
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 export interface BroadcastStats {
   concurrentViewers: number | null;
   totalViews: number | null;

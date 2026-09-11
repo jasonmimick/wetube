@@ -23,11 +23,22 @@ const { openBrowser } = require("./openBrowser");
 const APP_URL = (process.env.WETUBE_APP_URL || "").replace(/\/$/, "");
 const SHARED_SECRET = process.env.AGENT_SHARED_SECRET || "";
 
-// How often we ask for commands. Kept fast so pressing "Go Live" feels
-// instant. This is NOT how often the database is written — the server
+// How often we ask for commands while idle. This rate is a cost control,
+// not a comfort setting: it runs around the clock to catch 1-2 masses a
+// week. At the old 3000 it was ~28.8k Vercel requests/day and reached 75%
+// of the Fluid Active CPU allowance, where projects get paused (2026-09-10).
+// The tradeoff is that "Go Live" can take this long to reach this PC.
+//
+// Separately, this is NOT how often the database is written — the server
 // throttles the heartbeat write to ~30s. Coupling those two rates is what
-// exhausted the old Firestore quota and took the system down.
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 3000);
+// exhausted the old Firestore quota and took the system down (2026-08-10).
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 60000);
+
+// While a stream is actually live we poll fast again. Stop is the command
+// people wait on — mass has ended, and a minute of a dead Stop button reads
+// as broken. A 90-minute mass at 3s is ~1,800 requests, against ~1,400/day
+// for the idle rate, so this costs almost nothing at 1-2 masses a week.
+const LIVE_POLL_INTERVAL_MS = Number(process.env.LIVE_POLL_INTERVAL_MS || 3000);
 
 // Fail fast rather than hanging. The old Firestore client retried
 // internally for 600s, so one bad call wedged this loop for 10 minutes
@@ -151,7 +162,10 @@ async function tick() {
 }
 
 async function main() {
-  console.log(`[agent] starting — streamer=${process.env.STREAMER || "mock"}, poll=${POLL_INTERVAL_MS}ms`);
+  console.log(
+    `[agent] starting — streamer=${process.env.STREAMER || "mock"}, ` +
+      `poll=${POLL_INTERVAL_MS}ms idle / ${LIVE_POLL_INTERVAL_MS}ms while live`
+  );
 
   // Dashboard first, unconditionally — so config problems are visible on
   // screen instead of a console window that flashes an error and vanishes.
@@ -195,7 +209,9 @@ async function main() {
 
     const delay = consecutiveFailures
       ? Math.min(POLL_INTERVAL_MS * 2 ** consecutiveFailures, MAX_BACKOFF_MS)
-      : POLL_INTERVAL_MS;
+      : state.snapshot().streaming
+        ? LIVE_POLL_INTERVAL_MS
+        : POLL_INTERVAL_MS;
     await new Promise((r) => setTimeout(r, delay));
   }
 }
