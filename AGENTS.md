@@ -19,6 +19,12 @@ controls (mic mute).
 - [docs/MANUAL_SETUP.md](docs/MANUAL_SETUP.md) — the manual, credentialed
   steps a human has to do (YouTube OAuth, church-PC agent install) that
   can't be scripted from a sandbox.
+- [docs/HANDOFF-2026-09-11.md](docs/HANDOFF-2026-09-11.md) — state after the
+  Vercel Fluid CPU quota work: what was changed and verified, what is still
+  untested (the 3s-while-live switch, `completeBroadcast()`), the open
+  question about whether the 2026-09-06 Mass actually streamed, and
+  operational gotchas (`vercel env pull` returns empty secrets, SmartScreen
+  fires on every unsigned release, Vercel log output lags).
 
 ## Architecture in one paragraph
 
